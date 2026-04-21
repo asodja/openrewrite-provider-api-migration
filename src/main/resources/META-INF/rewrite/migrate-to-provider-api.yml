@@ -45,6 +45,12 @@ recipeList:
 
   # Tier 2 — multi-value mutations that compose with the setter rewrites above.
   - org.gradle.rewrite.providerapi.MigrateListPropertyPlusAssign
+  - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
+
+  # Tier 3 — advisor markers (no rewriting, just SearchResult annotations
+  # that show up as TODOs in the diff).
+  - org.gradle.rewrite.providerapi.DetectSelfReferencingFileCollection
+  - org.gradle.rewrite.providerapi.DetectSetterOverride
 ---
 type: specs.openrewrite.org/v1beta/recipe
 name: org.gradle.rewrite.providerapi.MigrateToProviderApi.NoKotlinAssignPlugin
@@ -66,3 +72,6 @@ recipeList:
   - org.gradle.rewrite.providerapi.MigrateDeleteTaskToTargetFiles
   - org.gradle.rewrite.providerapi.RenameKotlinBooleanAccessors
   - org.gradle.rewrite.providerapi.MigrateListPropertyPlusAssign
+  - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
+  - org.gradle.rewrite.providerapi.DetectSelfReferencingFileCollection
+  - org.gradle.rewrite.providerapi.DetectSetterOverride

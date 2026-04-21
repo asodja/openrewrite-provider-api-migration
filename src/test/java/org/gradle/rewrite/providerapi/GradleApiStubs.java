@@ -19,6 +19,8 @@ public final class GradleApiStubs {
             "    boolean isPresent();\n" +
             "    <S> Provider<S> map(java.util.function.Function<? super T, ? extends S> f);\n" +
             "    <S> Provider<S> flatMap(java.util.function.Function<? super T, ? extends Provider<? extends S>> f);\n" +
+            "    Provider<T> orElse(T defaultValue);\n" +
+            "    Provider<T> orElse(Provider<? extends T> defaultValue);\n" +
             "}\n";
 
     public static final String HAS_CONFIGURABLE_VALUE = "" +
