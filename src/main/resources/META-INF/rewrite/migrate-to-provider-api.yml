@@ -31,6 +31,7 @@ recipeList:
 
   # Tier 1 — read-only / renamed properties.
   - org.gradle.rewrite.providerapi.MigrateSetCommandLineMethod
+  - org.gradle.rewrite.providerapi.MigrateReadOnlyCommandLineAssignment
   - org.gradle.rewrite.providerapi.MigrateSourceAssignment
   - org.gradle.rewrite.providerapi.MigrateDeleteTaskToTargetFiles
 
@@ -45,6 +46,10 @@ recipeList:
 
   # Tier 2 — multi-value mutations that compose with the setter rewrites above.
   - org.gradle.rewrite.providerapi.MigrateListPropertyPlusAssign
+  - org.gradle.rewrite.providerapi.MigrateListPropertyClear
+  - org.gradle.rewrite.providerapi.MigrateAsListToGet
+  - org.gradle.rewrite.providerapi.MigrateMapPropertyClear
+  - org.gradle.rewrite.providerapi.MigrateMapPropertyIndexedAssign
   - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
 
   # Tier 3 — advisor markers (no rewriting, just SearchResult annotations
@@ -68,10 +73,15 @@ recipeList:
   - org.gradle.rewrite.providerapi.MigrateMapPropertySetter
   - org.gradle.rewrite.providerapi.MigratePropertySetter
   - org.gradle.rewrite.providerapi.MigrateSetCommandLineMethod
+  - org.gradle.rewrite.providerapi.MigrateReadOnlyCommandLineAssignment
   - org.gradle.rewrite.providerapi.MigrateSourceAssignment
   - org.gradle.rewrite.providerapi.MigrateDeleteTaskToTargetFiles
   - org.gradle.rewrite.providerapi.RenameKotlinBooleanAccessors
   - org.gradle.rewrite.providerapi.MigrateListPropertyPlusAssign
+  - org.gradle.rewrite.providerapi.MigrateListPropertyClear
+  - org.gradle.rewrite.providerapi.MigrateAsListToGet
+  - org.gradle.rewrite.providerapi.MigrateMapPropertyClear
+  - org.gradle.rewrite.providerapi.MigrateMapPropertyIndexedAssign
   - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
   - org.gradle.rewrite.providerapi.DetectSelfReferencingFileCollection
   - org.gradle.rewrite.providerapi.DetectSetterOverride

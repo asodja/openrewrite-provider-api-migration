@@ -56,6 +56,8 @@ public final class GradleApiStubs {
             "public interface ListProperty<T> extends Provider<java.util.List<T>>, HasMultipleValues<T> {\n" +
             "    void set(Iterable<? extends T> elements);\n" +
             "    void set(Provider<? extends Iterable<? extends T>> provider);\n" +
+            "    java.util.List<T> asList();\n" +  // deprecated — staged for removal; kept to match pre-migration code
+            "    void clear();\n" +                // same as above
             "}\n";
 
     public static final String SET_PROPERTY = "" +
@@ -75,6 +77,7 @@ public final class GradleApiStubs {
             "    void putAll(java.util.Map<? extends K, ? extends V> entries);\n" +
             "    void putAll(Provider<? extends java.util.Map<? extends K, ? extends V>> provider);\n" +
             "    void empty();\n" +
+            "    void clear();\n" +  // deprecated — staged for removal; kept to match pre-migration code
             "}\n";
 
     public static final String FILE_COLLECTION = "" +
