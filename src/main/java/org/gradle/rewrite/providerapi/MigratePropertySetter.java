@@ -1,5 +1,7 @@
 package org.gradle.rewrite.providerapi;
 
+import org.gradle.rewrite.providerapi.internal.MigratedProperties;
+import org.gradle.rewrite.providerapi.internal.MigratedProperties.Kind;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Option;
 import org.openrewrite.Recipe;
@@ -13,20 +15,22 @@ import org.openrewrite.java.tree.JavaType;
 import java.util.Collections;
 import java.util.List;
 
-import static org.gradle.rewrite.providerapi.internal.PropertyTypes.PROPERTY_FQN;
-
 /**
- * Migrate {@code recv.setX(v)} where {@code recv.getX()} returns {@code org.gradle.api.provider.Property<T>}
- * to {@code recv.getX().set(v)}.
+ * Migrate {@code recv.setX(v)} to {@code recv.getX().set(v)} for scalar {@code Property<T>} properties
+ * that have migrated from the eager setter API.
  *
- * <p>Matches on the declared return type of the corresponding getter, so recipe #1 does not overlap with
- * recipes that handle {@code ListProperty}, {@code MapProperty}, {@code ConfigurableFileCollection}, etc.
+ * <p>The recipe uses {@link MigratedProperties} as the source of truth for which properties have
+ * migrated — it does NOT inspect the corresponding getter's return type on the current classpath.
+ * That matters: users run this recipe on their current (pre-migration) Gradle, which still returns
+ * eager types from the getters. Consulting the classpath would cause the recipe to never fire.
+ * Sibling recipes handle {@code ListProperty}, {@code MapProperty}, {@code SetProperty}, and
+ * {@code ConfigurableFileCollection} by filtering on the catalog {@link Kind}.
  */
 public class MigratePropertySetter extends Recipe {
 
     @Option(displayName = "Setter method pattern",
             description = "Optional method matcher to restrict which setter signatures are rewritten. " +
-                          "By default, any setX(value) whose corresponding getX() returns Property<T> is rewritten.",
+                          "By default, any setX(value) for a cataloged SCALAR_PROPERTY is rewritten.",
             example = "org.gradle.api.tasks.testing.Test setMaxParallelForks(int)",
             required = false)
     private final String setterPattern;
@@ -46,30 +50,32 @@ public class MigratePropertySetter extends Recipe {
 
     @Override
     public String getDescription() {
-        return "Rewrites `recv.setX(v)` to `recv.getX().set(v)` when `recv.getX()` returns " +
-               "`org.gradle.api.provider.Property<T>`. Sibling recipes handle `ListProperty`, `MapProperty`, " +
-               "`SetProperty`, `ConfigurableFileCollection`, `DirectoryProperty`, and `RegularFileProperty`.";
+        return "Rewrites `recv.setX(v)` to `recv.getX().set(v)` for properties that migrated to " +
+               "`Property<T>` on the Provider API. Driven by a hardcoded catalog of migrated " +
+               "properties, so the recipe fires correctly when run against the old (pre-migration) " +
+               "Gradle classpath — consistent with how other OpenRewrite Gradle-upgrade recipes work.";
     }
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
         MethodMatcher userMatcher = setterPattern == null ? null : new MethodMatcher(setterPattern, true);
-        return new SetterToPropertyVisitor(userMatcher, PROPERTY_FQN, "set");
+        return new SetterToPropertyVisitor(userMatcher, Kind.SCALAR_PROPERTY, "set");
     }
 
     /**
-     * Generic visitor for rewriting {@code recv.setX(v)} into {@code recv.getX().<targetMethod>(v)} when the
-     * corresponding getter returns a specific property type. Shared by sibling recipes targeting
-     * {@code ListProperty}, {@code MapProperty}, etc.
+     * Rewrites {@code recv.setX(v)} into {@code recv.getX().<targetMethod>(v)} when the catalog says the
+     * property migrated to {@link Kind}. Shared by {@link MigratePropertySetter},
+     * {@link MigrateListPropertySetter}, {@link MigrateMapPropertySetter},
+     * {@link MigrateSetPropertySetter}, and {@link MigrateConfigurableFileCollectionSetter}.
      */
     static final class SetterToPropertyVisitor extends JavaIsoVisitor<ExecutionContext> {
         private final MethodMatcher userMatcher;
-        private final String targetPropertyFqn;
+        private final Kind expectedKind;
         private final String targetMethodName;
 
-        SetterToPropertyVisitor(MethodMatcher userMatcher, String targetPropertyFqn, String targetMethodName) {
+        SetterToPropertyVisitor(MethodMatcher userMatcher, Kind expectedKind, String targetMethodName) {
             this.userMatcher = userMatcher;
-            this.targetPropertyFqn = targetPropertyFqn;
+            this.expectedKind = expectedKind;
             this.targetMethodName = targetMethodName;
         }
 
@@ -81,45 +87,53 @@ public class MigratePropertySetter extends Recipe {
                 return m;
             }
 
-            if (m.getSelect() == null) {
-                return m;
-            }
-
-            JavaType.Method setterType = m.getMethodType();
-            if (setterType == null) {
-                return m;
-            }
-
-            String name = setterType.getName();
-            if (!name.startsWith("set") || name.length() <= 3 || !Character.isUpperCase(name.charAt(3))) {
-                return m;
-            }
-            if (setterType.getParameterTypes().size() != 1) {
-                return m;
-            }
-
-            List<Expression> args = m.getArguments();
-            if (args.size() != 1 || args.get(0) instanceof J.Empty) {
-                return m;
-            }
-
-            String getterName = "get" + name.substring(3);
-            JavaType.Method getterType = findNoArgMethod(setterType.getDeclaringType(), getterName);
-            if (getterType == null) {
-                return m;
-            }
-
-            JavaType.FullyQualified returnFq = asFullyQualified(getterType.getReturnType());
-            if (returnFq == null || !targetPropertyFqn.equals(returnFq.getFullyQualifiedName())) {
-                return m;
-            }
-
-            JavaType.Method targetMethodType = findTargetMethod(returnFq, targetMethodName);
-            if (targetMethodType == null) {
-                return m;
-            }
-
             Expression select = m.getSelect();
+            if (select == null) {
+                return m;
+            }
+
+            // Resolve the declaring type by preferring the method's declaring type when available
+            // (most precise), falling back to the receiver's static type (works when setter is gone
+            // from the new API classpath but receiver still attributes to a known Gradle type).
+            JavaType.Method setterType = m.getMethodType();
+            String methodName = setterType != null ? setterType.getName() : m.getSimpleName();
+            String propName = MigratedProperties.propertyNameFromSetter(methodName);
+            if (propName == null) {
+                return m;
+            }
+            if (m.getArguments().size() != 1 || m.getArguments().get(0) instanceof J.Empty) {
+                return m;
+            }
+
+            JavaType.FullyQualified declaring = resolveDeclaring(setterType, select);
+            Kind kind = MigratedProperties.lookup(declaring, propName);
+            if (kind != expectedKind) {
+                return m;
+            }
+
+            String getterName = "get" + methodName.substring(3);
+            return rebuildAsPropertyChain(m, getterName, declaring);
+        }
+
+        /**
+         * Construct {@code select.getX().<targetMethodName>(arg)}. Opportunistically attaches types when
+         * the getter is visible on the classpath (hybrid Gradle API, test stubs); on a strictly old
+         * classpath the generated call just carries null types — the next parse cycle re-attributes it.
+         */
+        private J.MethodInvocation rebuildAsPropertyChain(J.MethodInvocation m, String getterName,
+                                                           JavaType.FullyQualified declaring) {
+            Expression select = m.getSelect();
+            JavaType.Method getterType = findNoArgMethod(declaring, getterName);
+            JavaType.Method targetType = null;
+            if (getterType != null) {
+                JavaType returnType = getterType.getReturnType();
+                JavaType.FullyQualified returnFq = returnType instanceof JavaType.FullyQualified
+                        ? (JavaType.FullyQualified) returnType : null;
+                if (returnFq != null) {
+                    targetType = findMethod(returnFq, targetMethodName, 1);
+                }
+            }
+
             J.Identifier getterId = new J.Identifier(org.openrewrite.Tree.randomId(),
                     org.openrewrite.java.tree.Space.EMPTY, m.getMarkers(), Collections.emptyList(),
                     getterName, getterType, null);
@@ -141,7 +155,8 @@ public class MigratePropertySetter extends Recipe {
 
             J.Identifier targetId = new J.Identifier(org.openrewrite.Tree.randomId(),
                     org.openrewrite.java.tree.Space.EMPTY, m.getMarkers(), Collections.emptyList(),
-                    targetMethodName, targetMethodType, null);
+                    targetMethodName, targetType, null);
+            List<Expression> args = m.getArguments();
             return new J.MethodInvocation(
                     org.openrewrite.Tree.randomId(),
                     org.openrewrite.java.tree.Space.EMPTY,
@@ -151,16 +166,15 @@ public class MigratePropertySetter extends Recipe {
                     targetId,
                     org.openrewrite.java.tree.JContainer.build(org.openrewrite.java.tree.Space.EMPTY,
                             Collections.singletonList(
-                                    org.openrewrite.java.tree.JRightPadded.build(args.get(0))),
+                                    org.openrewrite.java.tree.JRightPadded.build(
+                                            args.get(0).withPrefix(org.openrewrite.java.tree.Space.EMPTY))),
                             m.getMarkers()),
-                    targetMethodType
+                    targetType
             );
         }
 
         private static JavaType.Method findNoArgMethod(JavaType.FullyQualified declaring, String name) {
-            if (declaring == null) {
-                return null;
-            }
+            if (declaring == null) return null;
             for (JavaType.Method method : declaring.getMethods()) {
                 if (method.getName().equals(name) && method.getParameterTypes().isEmpty()) {
                     return method;
@@ -169,46 +183,43 @@ public class MigratePropertySetter extends Recipe {
             JavaType.FullyQualified supertype = declaring.getSupertype();
             if (supertype != null && supertype != declaring) {
                 JavaType.Method r = findNoArgMethod(supertype, name);
-                if (r != null) {
-                    return r;
-                }
+                if (r != null) return r;
             }
             for (JavaType.FullyQualified iface : declaring.getInterfaces()) {
                 JavaType.Method r = findNoArgMethod(iface, name);
-                if (r != null) {
-                    return r;
-                }
+                if (r != null) return r;
             }
             return null;
         }
 
-        private static JavaType.Method findTargetMethod(JavaType.FullyQualified declaring, String methodName) {
-            if (declaring == null) {
-                return null;
-            }
+        private static JavaType.Method findMethod(JavaType.FullyQualified declaring, String name, int arity) {
+            if (declaring == null) return null;
             for (JavaType.Method method : declaring.getMethods()) {
-                if (method.getName().equals(methodName) && method.getParameterTypes().size() == 1) {
+                if (method.getName().equals(name) && method.getParameterTypes().size() == arity) {
                     return method;
                 }
             }
             JavaType.FullyQualified supertype = declaring.getSupertype();
             if (supertype != null && supertype != declaring) {
-                JavaType.Method r = findTargetMethod(supertype, methodName);
-                if (r != null) {
-                    return r;
-                }
+                JavaType.Method r = findMethod(supertype, name, arity);
+                if (r != null) return r;
             }
             for (JavaType.FullyQualified iface : declaring.getInterfaces()) {
-                JavaType.Method r = findTargetMethod(iface, methodName);
-                if (r != null) {
-                    return r;
-                }
+                JavaType.Method r = findMethod(iface, name, arity);
+                if (r != null) return r;
             }
             return null;
         }
 
-        private static JavaType.FullyQualified asFullyQualified(JavaType t) {
-            return t instanceof JavaType.FullyQualified ? (JavaType.FullyQualified) t : null;
+        private static JavaType.FullyQualified resolveDeclaring(JavaType.Method setterType, Expression select) {
+            if (setterType != null) {
+                JavaType.FullyQualified declaring = setterType.getDeclaringType();
+                if (declaring != null) {
+                    return declaring;
+                }
+            }
+            return select.getType() instanceof JavaType.FullyQualified
+                    ? (JavaType.FullyQualified) select.getType() : null;
         }
     }
 }

@@ -4,27 +4,27 @@ import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
 
-import static org.gradle.rewrite.providerapi.internal.PropertyTypes.MAP_PROPERTY_FQN;
+import org.gradle.rewrite.providerapi.internal.MigratedProperties.Kind;
 
 /**
- * Migrate {@code recv.setX(map)} where {@code recv.getX()} returns
- * {@code org.gradle.api.provider.MapProperty<K, V>} to {@code recv.getX().set(map)}.
+ * Migrate {@code recv.setX(map)} to {@code recv.getX().set(map)} for properties cataloged as
+ * {@code MAP_PROPERTY}.
  */
 public class MigrateMapPropertySetter extends Recipe {
 
     @Override
     public String getDisplayName() {
-        return "Migrate `setX(v)` to `getX().set(v)` for `MapProperty<K, V>` getters";
+        return "Migrate `setX(v)` to `getX().set(v)` for `MapProperty<K, V>` properties";
     }
 
     @Override
     public String getDescription() {
-        return "Rewrites `recv.setX(v)` to `recv.getX().set(v)` when `recv.getX()` returns " +
-               "`org.gradle.api.provider.MapProperty<K, V>`.";
+        return "Rewrites `recv.setX(v)` to `recv.getX().set(v)` for properties cataloged as " +
+               "migrating to `MapProperty<K, V>`.";
     }
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new MigratePropertySetter.SetterToPropertyVisitor(null, MAP_PROPERTY_FQN, "set");
+        return new MigratePropertySetter.SetterToPropertyVisitor(null, Kind.MAP_PROPERTY, "set");
     }
 }

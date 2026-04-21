@@ -4,28 +4,28 @@ import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
 
-import static org.gradle.rewrite.providerapi.internal.PropertyTypes.CONFIGURABLE_FILE_COLLECTION_FQN;
+import org.gradle.rewrite.providerapi.internal.MigratedProperties.Kind;
 
 /**
- * Migrate {@code recv.setX(v)} where {@code recv.getX()} returns
- * {@code org.gradle.api.file.ConfigurableFileCollection} to {@code recv.getX().setFrom(v)}.
+ * Migrate {@code recv.setX(v)} to {@code recv.getX().setFrom(v)} for properties cataloged as
+ * {@code CONFIGURABLE_FILE_COLLECTION}.
  */
 public class MigrateConfigurableFileCollectionSetter extends Recipe {
 
     @Override
     public String getDisplayName() {
-        return "Migrate `setX(v)` to `getX().setFrom(v)` for `ConfigurableFileCollection` getters";
+        return "Migrate `setX(v)` to `getX().setFrom(v)` for `ConfigurableFileCollection` properties";
     }
 
     @Override
     public String getDescription() {
-        return "Rewrites `recv.setX(v)` to `recv.getX().setFrom(v)` when `recv.getX()` returns " +
-               "`org.gradle.api.file.ConfigurableFileCollection`. Setters on `ConfigurableFileCollection` " +
+        return "Rewrites `recv.setX(v)` to `recv.getX().setFrom(v)` for properties cataloged as " +
+               "migrating to `ConfigurableFileCollection`. Setters on `ConfigurableFileCollection` " +
                "properties have been removed; `setFrom` is the replacement.";
     }
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new MigratePropertySetter.SetterToPropertyVisitor(null, CONFIGURABLE_FILE_COLLECTION_FQN, "setFrom");
+        return new MigratePropertySetter.SetterToPropertyVisitor(null, Kind.CONFIGURABLE_FILE_COLLECTION, "setFrom");
     }
 }

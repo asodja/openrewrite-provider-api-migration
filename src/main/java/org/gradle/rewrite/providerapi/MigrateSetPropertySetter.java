@@ -4,27 +4,27 @@ import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
 
-import static org.gradle.rewrite.providerapi.internal.PropertyTypes.SET_PROPERTY_FQN;
+import org.gradle.rewrite.providerapi.internal.MigratedProperties.Kind;
 
 /**
- * Migrate {@code recv.setX(set)} where {@code recv.getX()} returns
- * {@code org.gradle.api.provider.SetProperty<T>} to {@code recv.getX().set(set)}.
+ * Migrate {@code recv.setX(set)} to {@code recv.getX().set(set)} for properties cataloged as
+ * {@code SET_PROPERTY}.
  */
 public class MigrateSetPropertySetter extends Recipe {
 
     @Override
     public String getDisplayName() {
-        return "Migrate `setX(v)` to `getX().set(v)` for `SetProperty<T>` getters";
+        return "Migrate `setX(v)` to `getX().set(v)` for `SetProperty<T>` properties";
     }
 
     @Override
     public String getDescription() {
-        return "Rewrites `recv.setX(v)` to `recv.getX().set(v)` when `recv.getX()` returns " +
-               "`org.gradle.api.provider.SetProperty<T>`.";
+        return "Rewrites `recv.setX(v)` to `recv.getX().set(v)` for properties cataloged as " +
+               "migrating to `SetProperty<T>`.";
     }
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new MigratePropertySetter.SetterToPropertyVisitor(null, SET_PROPERTY_FQN, "set");
+        return new MigratePropertySetter.SetterToPropertyVisitor(null, Kind.SET_PROPERTY, "set");
     }
 }
