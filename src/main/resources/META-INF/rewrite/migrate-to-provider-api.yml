@@ -1,0 +1,68 @@
+#
+# Declarative meta-recipe that composes every mechanical Provider API fixer into a single
+# entry point users can activate via the rewrite Gradle plugin:
+#
+#   rewrite {
+#       activeRecipe("org.gradle.rewrite.providerapi.MigrateToProviderApi")
+#   }
+#
+# The recipes are ordered so narrower property-type matchers run before broader ones — that way
+# ConfigurableFileCollection / ListProperty / MapProperty setters are handled by their specific
+# rewriters before the generic Property<T> rewrite sees them.
+#
+---
+type: specs.openrewrite.org/v1beta/recipe
+name: org.gradle.rewrite.providerapi.MigrateToProviderApi
+displayName: Migrate to the Gradle Provider API
+description: >-
+  Mechanical rewrites to move a Gradle build (Java, Groovy, or Kotlin build-logic)
+  to the lazy Provider API. Composes every Tier-1 recipe in the
+  org.gradle.rewrite.providerapi package plus Tier-2 rewrites that are safe by
+  default. See MIGRATION-ANALYSIS.md for the full catalog of patterns covered.
+recipeList:
+  # Tier 1 — mechanical, type-driven setter rewrites.
+  # Order matters: the narrower (CFC, List/Set/Map) recipes match first so the
+  # generic Property<T> recipe doesn't try to rewrite their getters.
+  - org.gradle.rewrite.providerapi.MigrateConfigurableFileCollectionSetter
+  - org.gradle.rewrite.providerapi.MigrateListPropertySetter
+  - org.gradle.rewrite.providerapi.MigrateSetPropertySetter
+  - org.gradle.rewrite.providerapi.MigrateMapPropertySetter
+  - org.gradle.rewrite.providerapi.MigratePropertySetter
+
+  # Tier 1 — read-only / renamed properties.
+  - org.gradle.rewrite.providerapi.MigrateSetCommandLineMethod
+  - org.gradle.rewrite.providerapi.MigrateSourceAssignment
+  - org.gradle.rewrite.providerapi.MigrateDeleteTaskToTargetFiles
+
+  # Tier 1 — Kotlin boolean accessor renames.
+  - org.gradle.rewrite.providerapi.RenameKotlinBooleanAccessors
+
+  # Tier 1 — Kotlin DSL import additions. Enabled by default on the assumption
+  # build-logic has the Kotlin assignment compiler plugin applied (via kotlin-dsl).
+  # Users without it should activate MigrateToProviderApi.NoKotlinAssignPlugin below.
+  - org.gradle.rewrite.providerapi.AddKotlinAssignImport
+  - org.gradle.rewrite.providerapi.AddKotlinPlusAssignImport
+
+  # Tier 2 — multi-value mutations that compose with the setter rewrites above.
+  - org.gradle.rewrite.providerapi.MigrateListPropertyPlusAssign
+---
+type: specs.openrewrite.org/v1beta/recipe
+name: org.gradle.rewrite.providerapi.MigrateToProviderApi.NoKotlinAssignPlugin
+displayName: Migrate to the Gradle Provider API (no Kotlin assignment plugin)
+description: >-
+  Same as MigrateToProviderApi but omits the recipes that add
+  org.gradle.kotlin.dsl.assign / plusAssign imports. Use this variant if your
+  Kotlin build-logic does NOT apply the kotlin-dsl plugin (which bundles the
+  Kotlin assignment compiler plugin). Without the compiler plugin, the import
+  alone is not enough to make `prop = value` compile on a read-only `val`.
+recipeList:
+  - org.gradle.rewrite.providerapi.MigrateConfigurableFileCollectionSetter
+  - org.gradle.rewrite.providerapi.MigrateListPropertySetter
+  - org.gradle.rewrite.providerapi.MigrateSetPropertySetter
+  - org.gradle.rewrite.providerapi.MigrateMapPropertySetter
+  - org.gradle.rewrite.providerapi.MigratePropertySetter
+  - org.gradle.rewrite.providerapi.MigrateSetCommandLineMethod
+  - org.gradle.rewrite.providerapi.MigrateSourceAssignment
+  - org.gradle.rewrite.providerapi.MigrateDeleteTaskToTargetFiles
+  - org.gradle.rewrite.providerapi.RenameKotlinBooleanAccessors
+  - org.gradle.rewrite.providerapi.MigrateListPropertyPlusAssign
