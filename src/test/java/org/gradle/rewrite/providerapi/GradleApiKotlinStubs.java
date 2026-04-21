@@ -35,10 +35,7 @@ public final class GradleApiKotlinStubs {
 
     public static final String LIST_PROPERTY =
             "package org.gradle.api.provider\n" +
-            "interface ListProperty<T> : Provider<List<T>>, HasConfigurableValue {\n" +
-            "    fun add(value: T)\n" +
-            "    fun addAll(vararg values: T)\n" +
-            "    fun addAll(values: Iterable<T>)\n" +
+            "interface ListProperty<T> : Provider<List<T>>, HasMultipleValues<T> {\n" +
             "    fun set(elements: Iterable<T>?)\n" +
             "}\n";
 
@@ -79,6 +76,20 @@ public final class GradleApiKotlinStubs {
             "    fun setIgnoreExitValue(value: Boolean)\n" +
             "}\n";
 
+    public static final String KOTLIN_DSL_ASSIGN =
+            "package org.gradle.kotlin.dsl\n" +
+            "import org.gradle.api.provider.Property\n" +
+            "import org.gradle.api.provider.HasMultipleValues\n" +
+            "operator fun <T> Property<T>.assign(value: T) { this.set(value) }\n" +
+            "operator fun <T> HasMultipleValues<T>.plusAssign(value: T) { this.add(value) }\n";
+
+    public static final String HAS_MULTIPLE_VALUES =
+            "package org.gradle.api.provider\n" +
+            "interface HasMultipleValues<T> : HasConfigurableValue {\n" +
+            "    fun add(value: T)\n" +
+            "    fun addAll(vararg values: T)\n" +
+            "}\n";
+
     public static final String JAR_TASK =
             "package org.gradle.api.tasks.bundling\n" +
             "import org.gradle.api.provider.Property\n" +
@@ -95,6 +106,7 @@ public final class GradleApiKotlinStubs {
     public static final String[] ALL = new String[] {
             PROVIDER,
             HAS_CONFIGURABLE_VALUE,
+            HAS_MULTIPLE_VALUES,
             PROPERTY,
             LIST_PROPERTY,
             MAP_PROPERTY,
@@ -102,6 +114,7 @@ public final class GradleApiKotlinStubs {
             TEST_TASK,
             EXEC_SPEC,
             JAR_TASK,
+            KOTLIN_DSL_ASSIGN,
     };
 
     private GradleApiKotlinStubs() {}
