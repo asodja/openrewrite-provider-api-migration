@@ -1,0 +1,9 @@
+.gradle/
+build/
+out/
+bin/
+.idea/
+*.iml
+!.idea/
+.DS_Store
+.claude/settings.local.json
