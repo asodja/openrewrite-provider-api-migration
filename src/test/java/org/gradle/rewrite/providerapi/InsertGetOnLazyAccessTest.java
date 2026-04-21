@@ -12,29 +12,25 @@ class InsertGetOnLazyAccessTest implements RewriteTest {
 
     @Override
     public void defaults(RecipeSpec spec) {
-        // The input snippets call methods that don't exist on Provider<T> (e.g. Provider<String>.endsWith).
-        // That IS the migration scenario — user's pre-migration code no longer compiles against the new
-        // Provider-returning getters. We relax method-invocation type validation so the recipe runs against
-        // these intentionally-unresolved calls.
         spec.recipe(new InsertGetOnLazyAccess())
                 .parser(JavaParser.fromJavaVersion().dependsOn(GradleApiStubs.ALL))
                 .typeValidationOptions(TypeValidation.builder().methodInvocations(false).build());
     }
 
     @Test
-    void insertsGetOnStringMemberCall() {
+    void insertsGetOnCataloguedScalarProperty() {
         rewriteRun(
                 java(
-                        "import org.gradle.api.provider.Provider;\n" +
+                        "import org.gradle.api.tasks.testing.Test;\n" +
                         "class Build {\n" +
-                        "    boolean cfg(Provider<String> name) {\n" +
-                        "        return name.endsWith(\"-SNAPSHOT\");\n" +
+                        "    boolean cfg(Test t) {\n" +
+                        "        return t.getMaxMemory().endsWith(\"g\");\n" +
                         "    }\n" +
                         "}\n",
-                        "import org.gradle.api.provider.Provider;\n" +
+                        "import org.gradle.api.tasks.testing.Test;\n" +
                         "class Build {\n" +
-                        "    boolean cfg(Provider<String> name) {\n" +
-                        "        return name.get().endsWith(\"-SNAPSHOT\");\n" +
+                        "    boolean cfg(Test t) {\n" +
+                        "        return t.getMaxMemory().get().endsWith(\"g\");\n" +
                         "    }\n" +
                         "}\n"
                 )
@@ -45,10 +41,11 @@ class InsertGetOnLazyAccessTest implements RewriteTest {
     void doesNotTouchProviderMembers() {
         rewriteRun(
                 java(
-                        "import org.gradle.api.provider.Provider;\n" +
+                        "import org.gradle.api.tasks.testing.Test;\n" +
+                        "import org.gradle.api.provider.Property;\n" +
                         "class Build {\n" +
-                        "    Provider<Integer> cfg(Provider<String> name) {\n" +
-                        "        return name.map(String::length);\n" +
+                        "    Property<String> cfg(Test t) {\n" +
+                        "        return t.getMaxMemory();\n" +
                         "    }\n" +
                         "}\n"
                 )
@@ -56,12 +53,14 @@ class InsertGetOnLazyAccessTest implements RewriteTest {
     }
 
     @Test
-    void doesNotTouchNonProviderReceivers() {
+    void doesNotTouchUncatalogedProperty() {
         rewriteRun(
                 java(
+                        "import org.gradle.api.provider.Provider;\n" +
                         "class Build {\n" +
-                        "    boolean cfg(String name) {\n" +
-                        "        return name.endsWith(\"x\");\n" +
+                        "    boolean cfg(Provider<String> unrelated) {\n" +
+                        "        // Not cataloged; recipe should ignore.\n" +
+                        "        return unrelated.toString().startsWith(\"x\");\n" +
                         "    }\n" +
                         "}\n"
                 )

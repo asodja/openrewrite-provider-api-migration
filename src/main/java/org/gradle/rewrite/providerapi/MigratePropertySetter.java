@@ -87,14 +87,10 @@ public class MigratePropertySetter extends Recipe {
                 return m;
             }
 
-            Expression select = m.getSelect();
-            if (select == null) {
-                return m;
-            }
-
             // Resolve the declaring type by preferring the method's declaring type when available
-            // (most precise), falling back to the receiver's static type (works when setter is gone
-            // from the new API classpath but receiver still attributes to a known Gradle type).
+            // (most precise — works for both explicit and implicit-this calls), falling back to the
+            // receiver's static type. For implicit-this in Kotlin DSL blocks, getSelect() is null but
+            // getMethodType().getDeclaringType() points at the enclosing block's receiver type.
             JavaType.Method setterType = m.getMethodType();
             String methodName = setterType != null ? setterType.getName() : m.getSimpleName();
             String propName = MigratedProperties.propertyNameFromSetter(methodName);
@@ -105,7 +101,7 @@ public class MigratePropertySetter extends Recipe {
                 return m;
             }
 
-            JavaType.FullyQualified declaring = resolveDeclaring(setterType, select);
+            JavaType.FullyQualified declaring = resolveDeclaring(setterType, m.getSelect());
             Kind kind = MigratedProperties.lookup(declaring, propName);
             if (kind != expectedKind) {
                 return m;
@@ -123,6 +119,9 @@ public class MigratePropertySetter extends Recipe {
         private J.MethodInvocation rebuildAsPropertyChain(J.MethodInvocation m, String getterName,
                                                            JavaType.FullyQualified declaring) {
             Expression select = m.getSelect();
+            // Implicit-this calls (`setX(v)` inside a Kotlin DSL block) have no explicit receiver. We
+            // rewrite them to implicit-this getter chains (`getX().set(v)`) by leaving select null on
+            // the inner invocation too. Kotlin resolves the implicit receiver at compile time.
             JavaType.Method getterType = findNoArgMethod(declaring, getterName);
             JavaType.Method targetType = null;
             if (getterType != null) {
@@ -141,7 +140,7 @@ public class MigratePropertySetter extends Recipe {
                     org.openrewrite.Tree.randomId(),
                     m.getPrefix(),
                     m.getMarkers(),
-                    org.openrewrite.java.tree.JRightPadded.build(select),
+                    select == null ? null : org.openrewrite.java.tree.JRightPadded.build(select),
                     null,
                     getterId,
                     org.openrewrite.java.tree.JContainer.build(org.openrewrite.java.tree.Space.EMPTY,
@@ -217,6 +216,9 @@ public class MigratePropertySetter extends Recipe {
                 if (declaring != null) {
                     return declaring;
                 }
+            }
+            if (select == null) {
+                return null;
             }
             return select.getType() instanceof JavaType.FullyQualified
                     ? (JavaType.FullyQualified) select.getType() : null;

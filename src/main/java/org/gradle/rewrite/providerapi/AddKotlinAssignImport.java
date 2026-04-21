@@ -1,8 +1,10 @@
 package org.gradle.rewrite.providerapi;
 
+import org.gradle.rewrite.providerapi.internal.MigratedProperties;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
+import org.openrewrite.java.tree.Expression;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.JavaType;
 import org.openrewrite.kotlin.KotlinIsoVisitor;
@@ -45,10 +47,45 @@ public class AddKotlinAssignImport extends Recipe {
             @Override
             public J.Assignment visitAssignment(J.Assignment assignment, ExecutionContext ctx) {
                 J.Assignment a = super.visitAssignment(assignment, ctx);
-                if (isPropertyType(a.getVariable().getType())) {
+                if (shouldAddImport(a.getVariable())) {
                     maybeAddImport(KOTLIN_ASSIGN_FQN, null, false);
                 }
                 return a;
+            }
+
+            /**
+             * Two paths to trigger the import:
+             * <ol>
+             *   <li><b>Type-driven</b> — the LHS already resolves to a {@code Property<T>} subtype
+             *       (works on the new / hybrid Gradle classpath).</li>
+             *   <li><b>Catalog-driven</b> — the LHS name matches a cataloged migrated property and,
+             *       for field-access form, the receiver's type is a cataloged declaring type. Works on
+             *       the OLD Gradle classpath, which is what users run the recipe against.</li>
+             * </ol>
+             * The import is harmless when added unnecessarily, so we err on the side of adding it.
+             */
+            private boolean shouldAddImport(Expression lhs) {
+                if (isPropertyType(lhs.getType())) {
+                    return true;
+                }
+                if (lhs instanceof J.FieldAccess) {
+                    J.FieldAccess fa = (J.FieldAccess) lhs;
+                    String propName = fa.getName().getSimpleName();
+                    JavaType receiverType = fa.getTarget().getType();
+                    if (receiverType instanceof JavaType.FullyQualified
+                            && MigratedProperties.lookup((JavaType.FullyQualified) receiverType, propName) != null) {
+                        return true;
+                    }
+                    // Fall through to name-only check below.
+                    return MigratedProperties.isKnownPropertyName(propName);
+                }
+                if (lhs instanceof J.Identifier) {
+                    // Implicit-`this` form inside a Kotlin DSL block, e.g. `isIgnoreExitValue = true`
+                    // where the enclosing javaexec { ... } has ExecSpec as receiver. We can't resolve
+                    // the receiver from the identifier alone, so fall back to name-only catalog check.
+                    return MigratedProperties.isKnownPropertyName(((J.Identifier) lhs).getSimpleName());
+                }
+                return false;
             }
 
             private boolean isPropertyType(JavaType type) {

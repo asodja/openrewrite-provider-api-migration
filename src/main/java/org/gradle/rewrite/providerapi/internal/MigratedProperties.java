@@ -44,6 +44,28 @@ public final class MigratedProperties {
     static {
         Map<String, Map<String, Kind>> t = new HashMap<>();
 
+        // Seed from the auto-generated catalog (scans of Gradle's @ReplacesEagerProperty annotations).
+        // The generator runs against the gradle10/provider-api-migration branch; regenerate via
+        // tools/extract_catalog.py | tools/catalog_to_java.py.
+        MigratedPropertiesCatalog.populate(new MigratedPropertiesCatalog.CatalogSink() {
+            @Override public void put(String declaringType, Map<String, Kind> entries) {
+                MigratedProperties.put(t, declaringType, entries);
+            }
+            @Override public Map<String, Kind> scalar(String... names) { return MigratedProperties.scalar(names); }
+            @Override public Map<String, Kind> listLike(String... names) { return MigratedProperties.listLike(names); }
+            @Override public Map<String, Kind> setLike(String... names) { return MigratedProperties.withKind(Kind.SET_PROPERTY, names); }
+            @Override public Map<String, Kind> mapLike(String... names) { return MigratedProperties.mapLike(names); }
+            @Override public Map<String, Kind> configurableFileCollection(String... names) { return MigratedProperties.configurableFileCollection(names); }
+            @Override public Map<String, Kind> directory(String... names) { return MigratedProperties.directory(names); }
+            @Override public Map<String, Kind> regularFile(String... names) { return MigratedProperties.regularFile(names); }
+        });
+
+        // -------- Hand-curated additions below. These supplement the auto-generated catalog for:
+        //  1. Properties not yet annotated with @ReplacesEagerProperty in the source
+        //  2. Boolean renames Kotlin-DSL-specific entries that aren't part of the auto-scan
+        //  3. Aliases for types that have been refactored between releases
+        // --------
+
         // org.gradle.api.tasks.testing.Test
         put(t, "org.gradle.api.tasks.testing.Test", scalar(
                 "maxParallelForks",
@@ -94,8 +116,24 @@ public final class MigratedProperties {
                 "mainClass",
                 "maxHeapSize",
                 "minHeapSize",
-                "enableAssertions"
+                "enableAssertions",
+                "executable",
+                "debug"
         ));
+        // ExecSpec / Exec share executable + debug too
+        for (String receiver : Arrays.asList(
+                "org.gradle.process.ExecSpec",
+                "org.gradle.api.tasks.Exec")) {
+            put(t, receiver, scalar("executable"));
+        }
+        put(t, "org.gradle.process.JavaExecSpec", scalar(
+                "main", "mainClass", "maxHeapSize", "minHeapSize", "enableAssertions",
+                "executable", "debug", "standardOutput", "errorOutput", "standardInput",
+                "ignoreExitValue"
+        ));
+        put(t, "org.gradle.process.JavaExecSpec", listLike("jvmArgs", "args"));
+        put(t, "org.gradle.process.JavaExecSpec", configurableFileCollection("classpath"));
+        put(t, "org.gradle.process.JavaExecSpec", mapLike("systemProperties", "environment"));
         put(t, "org.gradle.api.tasks.JavaExec", listLike(
                 "jvmArgs"
         ));
@@ -173,6 +211,15 @@ public final class MigratedProperties {
                 "push"
         ));
 
+        // Code quality extensions
+        put(t, "org.gradle.api.plugins.quality.CheckstyleExtension", scalar("toolVersion"));
+        put(t, "org.gradle.api.plugins.quality.Checkstyle", scalar("toolVersion"));
+        put(t, "org.gradle.api.plugins.quality.PmdExtension", scalar("toolVersion"));
+        put(t, "org.gradle.api.plugins.quality.CodeNarcExtension", scalar("toolVersion"));
+        put(t, "org.gradle.api.plugins.quality.JDependExtension", scalar("toolVersion"));
+        put(t, "org.gradle.testing.jacoco.plugins.JacocoPluginExtension", scalar("toolVersion"));
+        put(t, "org.gradle.api.plugins.quality.CodeQualityExtension", scalar("toolVersion"));
+
         // Freeze
         TABLE = Collections.unmodifiableMap(t);
     }
@@ -206,10 +253,32 @@ public final class MigratedProperties {
         return null;
     }
 
+    /** True if {@code kind} is one of the scalar-or-file kinds that should get {@code .get()} inserted
+     * before method calls on the value type. */
+    public static boolean isScalarLike(Kind kind) {
+        return kind == Kind.SCALAR_PROPERTY
+                || kind == Kind.REGULAR_FILE_PROPERTY
+                || kind == Kind.DIRECTORY_PROPERTY;
+    }
+
     /** Exact-type lookup, no hierarchy walk. Used by callers that already walked the hierarchy. */
     public static Kind lookupExact(String declaringTypeFqn, String propertyName) {
         Map<String, Kind> entries = TABLE.get(declaringTypeFqn);
         return entries == null ? null : entries.get(propertyName);
+    }
+
+    /**
+     * True if ANY cataloged type has a property with this name. Used as a fallback when the recipe
+     * can't resolve the enclosing receiver's type (e.g. implicit {@code this} inside a Kotlin DSL
+     * block). Over-broad on purpose — callers that use this fallback should be making
+     * conservatively-safe edits (like adding an import), not reshaping code.
+     */
+    public static boolean isKnownPropertyName(String propertyName) {
+        if (propertyName == null) return false;
+        for (Map<String, Kind> entries : TABLE.values()) {
+            if (entries.containsKey(propertyName)) return true;
+        }
+        return false;
     }
 
     /**

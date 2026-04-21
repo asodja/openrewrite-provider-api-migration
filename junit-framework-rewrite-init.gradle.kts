@@ -4,8 +4,7 @@
 // Usage (from the junit-framework directory):
 //     ./gradlew --init-script /Users/asodja/workspace/openrewrite-provider-api-migration/junit-framework-rewrite-init.gradle.kts rewriteDryRun
 //
-// Publishes the recipe module as org.gradle.rewrite:gradle-provider-api-migration:0.1.0-SNAPSHOT
-// in ~/.m2/repository (run ./gradlew publishToMavenLocal in the recipe module first).
+// Requires: ./gradlew publishToMavenLocal in the recipe module first.
 
 initscript {
     repositories {
@@ -16,10 +15,15 @@ initscript {
     }
 }
 
-// Only apply to the primary build, NOT to junit-framework's gradle/plugins included build
-// (that build has its own settings.gradle.kts and can't accept RewritePlugin wholesale).
+// Apply rewrite to BOTH the primary build AND the `gradle/plugins` included build — junit-framework's
+// regular .kt build-logic lives in the included build, and that's where the Kotlin assign-import
+// additions need to land. Match by rootProject name so we don't apply to unrelated settings.
 allprojects {
-    if (rootProject.name != "junit-framework") {
+    val rootName = rootProject.name
+    if (project != rootProject) {
+        return@allprojects
+    }
+    if (rootName != "junit-framework" && rootName != "plugins") {
         return@allprojects
     }
 

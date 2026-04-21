@@ -51,11 +51,13 @@ recipeList:
   - org.gradle.rewrite.providerapi.MigrateMapPropertyClear
   - org.gradle.rewrite.providerapi.MigrateMapPropertyIndexedAssign
   - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
+  - org.gradle.rewrite.providerapi.InsertAsFileGet
 
   # Tier 3 — advisor markers (no rewriting, just SearchResult annotations
   # that show up as TODOs in the diff).
   - org.gradle.rewrite.providerapi.DetectSelfReferencingFileCollection
   - org.gradle.rewrite.providerapi.DetectSetterOverride
+  - org.gradle.rewrite.providerapi.FlagMapPropertyMutations
 ---
 type: specs.openrewrite.org/v1beta/recipe
 name: org.gradle.rewrite.providerapi.MigrateToProviderApi.NoKotlinAssignPlugin
@@ -83,5 +85,7 @@ recipeList:
   - org.gradle.rewrite.providerapi.MigrateMapPropertyClear
   - org.gradle.rewrite.providerapi.MigrateMapPropertyIndexedAssign
   - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
+  - org.gradle.rewrite.providerapi.InsertAsFileGet
   - org.gradle.rewrite.providerapi.DetectSelfReferencingFileCollection
   - org.gradle.rewrite.providerapi.DetectSetterOverride
+  - org.gradle.rewrite.providerapi.FlagMapPropertyMutations
