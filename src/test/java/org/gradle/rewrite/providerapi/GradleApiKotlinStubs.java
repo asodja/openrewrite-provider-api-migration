@@ -90,6 +90,13 @@ public final class GradleApiKotlinStubs {
             "    fun addAll(vararg values: T)\n" +
             "}\n";
 
+    public static final String DELETE_TASK =
+            "package org.gradle.api.tasks\n" +
+            "import org.gradle.api.file.ConfigurableFileCollection\n" +
+            "abstract class Delete {\n" +
+            "    abstract fun getTargetFiles(): ConfigurableFileCollection\n" +
+            "}\n";
+
     public static final String JAR_TASK =
             "package org.gradle.api.tasks.bundling\n" +
             "import org.gradle.api.provider.Property\n" +
@@ -113,6 +120,7 @@ public final class GradleApiKotlinStubs {
             CONFIGURABLE_FILE_COLLECTION,
             TEST_TASK,
             EXEC_SPEC,
+            DELETE_TASK,
             JAR_TASK,
             KOTLIN_DSL_ASSIGN,
     };
