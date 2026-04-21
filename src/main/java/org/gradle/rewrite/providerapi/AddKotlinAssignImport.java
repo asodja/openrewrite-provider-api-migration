@@ -18,6 +18,12 @@ import static org.gradle.rewrite.providerapi.internal.PropertyTypes.PROPERTY_FQN
  * {@code prop = value} shorthand for {@code prop.set(value)} — but only when the extension is imported.
  * {@code .gradle.kts} scripts auto-import it; plain {@code .kt} build-logic sources do not. This recipe
  * detects Property-typed assignments in {@code .kt} files and adds the missing import.
+ *
+ * <p><b>Default behavior — enabled by default.</b> The assumption is that build-logic using property
+ * assignment syntax already has the Kotlin assignment compiler plugin applied (via {@code kotlin-dsl}
+ * or explicitly). Users whose build-logic does NOT have the assignment plugin should skip this recipe
+ * and instead rely on the sibling rewrite that emits {@code getX().set(v)} — since the import alone
+ * isn't enough to make {@code prop = value} compile without the plugin.
  */
 public class AddKotlinAssignImport extends Recipe {
 
