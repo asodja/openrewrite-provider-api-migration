@@ -9,6 +9,15 @@ import static org.openrewrite.java.Assertions.java;
 
 class DetectSelfReferencingFileCollectionTest implements RewriteTest {
 
+    private static final String MARKER = "Self-referencing ConfigurableFileCollection: " +
+            "`classpath.setFrom(...)` reads `classpath` on the RHS. Evaluation is deferred, so " +
+            "this loops back to an empty collection or deadlocks. Replace with: " +
+            "`classpath.from(extra)` (additive intent, preferred), OR " +
+            "`val prev = classpath.files; classpath.setFrom(); classpath.from(prev, extra)` " +
+            "(capture-then-rebuild), OR " +
+            "`(classpath as DefaultConfigurableFileCollection).replace { it + extra }` " +
+            "(Gradle internal API, fragile).";
+
     @Override
     public void defaults(RecipeSpec spec) {
         spec.recipe(new DetectSelfReferencingFileCollection())
@@ -28,7 +37,7 @@ class DetectSelfReferencingFileCollectionTest implements RewriteTest {
                         "import org.gradle.api.file.ConfigurableFileCollection;\n" +
                         "class Build {\n" +
                         "    void cfg(ConfigurableFileCollection classpath, Object extra) {\n" +
-                        "        /*~~(Self-referencing ConfigurableFileCollection: `classpath.setFrom(...)` reads `classpath` on the RHS. Capture to a local or use `.from(extra)` if intent was additive.)~~>*/classpath.setFrom(extra, classpath);\n" +
+                        "        /*~~(" + MARKER + ")~~>*/classpath.setFrom(extra, classpath);\n" +
                         "    }\n" +
                         "}\n"
                 )

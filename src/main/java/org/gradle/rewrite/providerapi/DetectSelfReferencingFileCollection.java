@@ -62,10 +62,16 @@ public class DetectSelfReferencingFileCollection extends Recipe {
                 }
                 for (Expression arg : m.getArguments()) {
                     if (referencesName(arg, receiverKey)) {
-                        return SearchResult.found(m,
+                        String message =
                                 "Self-referencing ConfigurableFileCollection: `" + receiverKey + "." + name +
-                                "(...)` reads `" + receiverKey + "` on the RHS. Capture to a local or use " +
-                                "`.from(extra)` if intent was additive.");
+                                "(...)` reads `" + receiverKey + "` on the RHS. Evaluation is deferred, so " +
+                                "this loops back to an empty collection or deadlocks. Replace with: " +
+                                "`" + receiverKey + ".from(extra)` (additive intent, preferred), OR " +
+                                "`val prev = " + receiverKey + ".files; " + receiverKey + ".setFrom(); " +
+                                receiverKey + ".from(prev, extra)` (capture-then-rebuild), OR " +
+                                "`(" + receiverKey + " as DefaultConfigurableFileCollection).replace { it + extra }` " +
+                                "(Gradle internal API, fragile).";
+                        return SearchResult.found(m, message);
                     }
                 }
                 return m;

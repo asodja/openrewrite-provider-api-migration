@@ -1,11 +1,10 @@
 // Generic init script that wires the Provider API migration recipes into any Gradle project.
 //
 // Usage (from the target project's directory):
-//     ./gradlew --init-script /Users/asodja/workspace/openrewrite-provider-api-migration/rewrite-init.gradle.kts rewriteRun
+//     ./gradlew --init-script /Users/asodja/workspace/openrewrite-provider-api-migration/rewrite-init.gradle.kts providerApiMigrate
 //
-// For projects with included builds containing Kotlin source that also needs migrating (e.g.
-// junit-framework's gradle/plugins), run a second invocation with the included build's task prefix:
-//     ./gradlew --init-script .../rewrite-init.gradle.kts :plugins:rewriteRun
+// The `providerApiMigrate` aggregator task runs `rewriteRun` in the primary build AND in every
+// included build, so one command migrates the whole project tree.
 //
 // Requires ./gradlew publishToMavenLocal in the recipe module first.
 
@@ -18,9 +17,8 @@ initscript {
     }
 }
 
-// Apply to the rootProject of any primary build we see. Works for both "junit-framework" and "spring"
-// (and any other Gradle project). We skip non-root projects because the rewrite plugin discovers
-// subprojects itself from the root.
+// Apply rewrite to the rootProject of every build in scope (primary build + included builds).
+// The rewrite-gradle-plugin then discovers subprojects itself from each root.
 allprojects {
     if (project != rootProject) {
         return@allprojects
@@ -39,5 +37,26 @@ allprojects {
 
     dependencies {
         "rewrite"("org.gradle.rewrite:gradle-provider-api-migration:0.1.0-SNAPSHOT")
+    }
+}
+
+// Register a top-level aggregator so users don't have to enumerate included builds manually. Runs
+// after configuration of all builds, so includedBuilds resolves correctly.
+gradle.projectsEvaluated {
+    gradle.rootProject.tasks.register("providerApiMigrate") {
+        group = "rewrite"
+        description = "Run the Gradle Provider API migration across the primary build and every included build."
+        dependsOn(gradle.rootProject.tasks.named("rewriteRun"))
+        gradle.includedBuilds.forEach { inc ->
+            dependsOn(inc.task(":rewriteRun"))
+        }
+    }
+    gradle.rootProject.tasks.register("providerApiMigrateDryRun") {
+        group = "rewrite"
+        description = "Dry-run of providerApiMigrate: show the diff without applying changes."
+        dependsOn(gradle.rootProject.tasks.named("rewriteDryRun"))
+        gradle.includedBuilds.forEach { inc ->
+            dependsOn(inc.task(":rewriteDryRun"))
+        }
     }
 }

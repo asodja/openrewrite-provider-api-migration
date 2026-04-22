@@ -282,6 +282,31 @@ public final class MigratedProperties {
     }
 
     /**
+     * Name-only fallback that returns a {@link Kind} only if <em>every</em> cataloged entry for
+     * {@code propertyName} agrees on the same kind. Used when the declaring type can't be resolved
+     * on the classpath — most commonly for implicit-{@code this} calls inside Kotlin DSL blocks like
+     * {@code tasks.javadoc { setMaxMemory(...) }} or {@code doLast { ... }}. Ambiguous names (where
+     * different cataloged types disagree on the kind) return {@code null} — the caller then plays it
+     * safe and leaves the code alone.
+     */
+    public static Kind lookupByNameOnly(String propertyName) {
+        if (propertyName == null) {
+            return null;
+        }
+        Kind agreed = null;
+        for (Map<String, Kind> entries : TABLE.values()) {
+            Kind k = entries.get(propertyName);
+            if (k == null) continue;
+            if (agreed == null) {
+                agreed = k;
+            } else if (agreed != k) {
+                return null; // ambiguous — different types use different kinds
+            }
+        }
+        return agreed;
+    }
+
+    /**
      * Convert a setter method name like {@code setMaxParallelForks} to its property name
      * {@code maxParallelForks}. Returns {@code null} if the name isn't a valid setter shape.
      */

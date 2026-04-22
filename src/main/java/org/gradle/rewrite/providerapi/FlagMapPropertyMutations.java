@@ -58,10 +58,41 @@ public class FlagMapPropertyMutations extends Recipe {
                 if (!isMapPropertyReceiver(select)) {
                     return m;
                 }
-                return SearchResult.found(m,
-                        "MapProperty does not support `" + m.getSimpleName() + "`. Rewrite manually as a " +
-                        "copy-mutate-set: `val m = prop.get().toMutableMap(); m." + m.getSimpleName() +
-                        "(...); prop.set(m)`. See MIGRATION-ANALYSIS.md §4(g).");
+                String receiverLabel = renderReceiver(select);
+                String call = m.getSimpleName();
+                String argsRender = renderArgs(m);
+                String message =
+                        "MapProperty does not support `" + call + "(...)`. Replace with the " +
+                        "copy-mutate-set pattern: `val updated = " + receiverLabel + ".get()" +
+                        ".toMutableMap(); updated." + call + "(" + argsRender + "); " +
+                        receiverLabel + ".set(updated)`. Internal-API alternative (fragile): " +
+                        "`(" + receiverLabel + " as DefaultMapProperty<*, *>).replace { " +
+                        "it.map { m -> m.toMutableMap().apply { " + call + "(" + argsRender + ") } } }`.";
+                return SearchResult.found(m, message);
+            }
+
+            private String renderReceiver(Expression select) {
+                if (select instanceof J.FieldAccess) {
+                    J.FieldAccess fa = (J.FieldAccess) select;
+                    return fa.getTarget() + "." + fa.getName().getSimpleName();
+                }
+                if (select instanceof J.Identifier) {
+                    return ((J.Identifier) select).getSimpleName();
+                }
+                return "prop";
+            }
+
+            private String renderArgs(J.MethodInvocation m) {
+                java.util.List<Expression> args = m.getArguments();
+                if (args.isEmpty() || args.get(0) instanceof J.Empty) {
+                    return "";
+                }
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < args.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(args.get(i).toString().trim());
+                }
+                return sb.toString();
             }
 
             /**

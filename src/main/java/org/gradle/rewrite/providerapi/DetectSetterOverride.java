@@ -93,10 +93,16 @@ public class DetectSetterOverride extends Recipe {
                 if (!extendsWatched(fq)) {
                     return m;
                 }
-                return SearchResult.found(m,
-                        "Override of `" + name + "` — the Provider API migration removes this setter on " +
-                        fq.getFullyQualifiedName() + ". Move the logic to the call site or to a " +
-                        "`Property.convention(...)` on the corresponding getter.");
+                String getterName = "get" + name.substring(3);
+                String parentFqn = fq.getFullyQualifiedName();
+                String message =
+                        "Override of `" + name + "` on subclass of `" + parentFqn + "` — the Provider API " +
+                        "migration removes this setter, so the override is orphaned. Options: " +
+                        "(1) move the logic to each call site, or " +
+                        "(2) configure `" + getterName + "().convention(...)` in the subclass constructor to preserve defaults, or " +
+                        "(3) lift preprocessing into `" + getterName + "().finalizeValueOnRead()` plus a " +
+                        "transform provider. Remove the `" + name + "(...)` method once callers are updated.";
+                return SearchResult.found(m, message);
             }
 
             private boolean extendsWatched(JavaType.FullyQualified fq) {

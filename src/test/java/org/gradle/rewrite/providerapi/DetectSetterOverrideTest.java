@@ -9,6 +9,14 @@ import static org.openrewrite.java.Assertions.java;
 
 class DetectSetterOverrideTest implements RewriteTest {
 
+    private static final String MARKER = "Override of `setClasspath` on subclass of " +
+            "`org.gradle.api.tasks.testing.Test` — the Provider API migration removes this setter, " +
+            "so the override is orphaned. Options: " +
+            "(1) move the logic to each call site, or " +
+            "(2) configure `getClasspath().convention(...)` in the subclass constructor to preserve defaults, or " +
+            "(3) lift preprocessing into `getClasspath().finalizeValueOnRead()` plus a transform provider. " +
+            "Remove the `setClasspath(...)` method once callers are updated.";
+
     @Override
     public void defaults(RecipeSpec spec) {
         spec.recipe(new DetectSetterOverride())
@@ -29,7 +37,7 @@ class DetectSetterOverrideTest implements RewriteTest {
                         "import org.gradle.api.tasks.testing.Test;\n" +
                         "import org.gradle.api.file.FileCollection;\n" +
                         "public class MyTest extends Test {\n" +
-                        "    /*~~(Override of `setClasspath` — the Provider API migration removes this setter on org.gradle.api.tasks.testing.Test. Move the logic to the call site or to a `Property.convention(...)` on the corresponding getter.)~~>*/@Override\n" +
+                        "    /*~~(" + MARKER + ")~~>*/@Override\n" +
                         "    public void setClasspath(FileCollection cp) {\n" +
                         "    }\n" +
                         "}\n"
