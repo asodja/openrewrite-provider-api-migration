@@ -33,6 +33,17 @@ allprojects {
 
     configure<org.openrewrite.gradle.RewriteExtension> {
         activeRecipe("org.gradle.rewrite.providerapi.MigrateToProviderApi")
+        // Skip generated / tooling dirs — they're never user source. These save parse time up-front
+        // (the rewrite plugin doesn't even parse excluded paths), complementing the runtime
+        // GradleBuildLogic filter that skips production code.
+        exclusion("**/build/**")
+        exclusion("**/.gradle/**")
+        exclusion("**/.idea/**")
+        exclusion("**/.vscode/**")
+        exclusion("**/out/**")
+        exclusion("**/bin/**")
+        exclusion("**/target/**")
+        exclusion("**/node_modules/**")
     }
 
     dependencies {
