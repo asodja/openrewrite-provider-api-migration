@@ -2,6 +2,7 @@ package org.gradle.rewrite.providerapi;
 
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
+import org.openrewrite.SourceFile;
 import org.openrewrite.TreeVisitor;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.JavaType;
@@ -36,6 +37,14 @@ public class AddKotlinPlusAssignImport extends Recipe {
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
         return new KotlinIsoVisitor<ExecutionContext>() {
+            @Override
+            public boolean isAcceptable(SourceFile sourceFile, ExecutionContext ctx) {
+                // `.gradle.kts` scripts auto-import the Kotlin DSL bundle (which includes `plusAssign`).
+                // Only plain `.kt` sources need the explicit import added.
+                String path = sourceFile.getSourcePath().toString();
+                return path.endsWith(".kt") && !path.endsWith(".gradle.kts");
+            }
+
             @Override
             public J.AssignmentOperation visitAssignmentOperation(J.AssignmentOperation op, ExecutionContext ctx) {
                 J.AssignmentOperation a = super.visitAssignmentOperation(op, ctx);

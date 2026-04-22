@@ -3,6 +3,7 @@ package org.gradle.rewrite.providerapi;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
+import org.openrewrite.SourceFile;
 import org.openrewrite.TreeVisitor;
 import org.openrewrite.java.tree.Expression;
 import org.openrewrite.java.tree.J;
@@ -44,6 +45,14 @@ public class AddKotlinAssignImport extends Recipe {
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
         return new KotlinIsoVisitor<ExecutionContext>() {
+            @Override
+            public boolean isAcceptable(SourceFile sourceFile, ExecutionContext ctx) {
+                // `.gradle.kts` scripts auto-import the Kotlin DSL bundle (which includes `assign`).
+                // Only plain `.kt` sources need the explicit import added.
+                String path = sourceFile.getSourcePath().toString();
+                return path.endsWith(".kt") && !path.endsWith(".gradle.kts");
+            }
+
             @Override
             public J.Assignment visitAssignment(J.Assignment assignment, ExecutionContext ctx) {
                 J.Assignment a = super.visitAssignment(assignment, ctx);

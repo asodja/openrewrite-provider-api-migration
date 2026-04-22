@@ -49,6 +49,23 @@ class AddKotlinAssignImportTest implements RewriteTest {
     }
 
     @Test
+    void doesNotAddImportInGradleScriptFiles() {
+        // .gradle.kts scripts auto-import the Kotlin DSL bundle (including `assign`). No need to add it.
+        rewriteRun(
+                s -> s.recipe(new AddKotlinAssignImport())
+                        .parser(org.openrewrite.kotlin.KotlinParser.builder().dependsOn(GradleApiKotlinStubs.ALL)),
+                org.openrewrite.kotlin.Assertions.kotlin(
+                        "import org.gradle.api.provider.Property\n" +
+                        "class Holder { val p: Property<String> = TODO() }\n" +
+                        "fun cfg(h: Holder) {\n" +
+                        "    h.p = \"foo\"\n" +
+                        "}\n",
+                        spec -> spec.path("build.gradle.kts")
+                )
+        );
+    }
+
+    @Test
     void doesNotAddImportWhenNoPropertyAssignment() {
         rewriteRun(
                 kotlin(
