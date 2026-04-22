@@ -1,6 +1,13 @@
 plugins {
     `java-library`
     `maven-publish`
+    application
+}
+
+application {
+    // The standalone runner — used to migrate large projects (e.g. Kotlin repo) without
+    // triggering the rewrite-gradle-plugin's compile cascade. See tools/run-migration.sh.
+    mainClass.set("org.gradle.rewrite.providerapi.tools.StandaloneRunner")
 }
 
 group = "org.gradle.rewrite"
@@ -31,6 +38,8 @@ dependencies {
 
     runtimeOnly("org.openrewrite:rewrite-java-17")
     runtimeOnly("org.openrewrite:rewrite-java-21")
+    // Silence slf4j "no binding" warnings from the standalone runner. The -nop binding discards.
+    runtimeOnly("org.slf4j:slf4j-nop:2.0.16")
 
     compileOnly("org.projectlombok:lombok:1.18.36")
     annotationProcessor("org.projectlombok:lombok:1.18.36")

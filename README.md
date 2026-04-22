@@ -47,37 +47,54 @@ Publishes `org.gradle.rewrite:gradle-provider-api-migration:0.1.0-SNAPSHOT` to `
 
 ## Run against a target project
 
-The easiest way is an init script — no edits needed in the target project. Save the repo path once:
+Two ways, both drop-in — no edits to the target project.
+
+### Option 1 — Standalone runner (recommended)
+
+The standalone runner bypasses Gradle's task graph entirely. It uses a tiny discovery init-script
+to enumerate source dirs + build scripts (configuration-only, no compile cascade), then runs the
+recipe directly via OpenRewrite's parsers. Works cleanly on projects that choke the plugin path
+(Kotlin repo, any large multi-project build).
 
 ```bash
 export RECIPE_REPO=/Users/asodja/workspace/openrewrite-provider-api-migration
+cd /path/to/your/project
+
+# Dry run — prints list of files that would change
+$RECIPE_REPO/run-migration.sh .
+
+# Apply for real
+$RECIPE_REPO/run-migration.sh . --apply
 ```
 
-Then from the target project's root:
+What happens under the hood:
+1. `discovery-init.gradle.kts` fires in `projectsEvaluated` and writes `.rewrite-manifest.json`
+   (source sets + project roots + nested builds), then throws to abort before any task runs. ~5s.
+2. `run-migration.sh` filters the manifest to build-logic dirs + individual `*.gradle[.kts]`
+   scripts at project roots.
+3. `StandaloneRunner` (the main class packaged by `./gradlew installDist`) parses those files
+   with OpenRewrite and runs the meta-recipe. Writes diffs in-place when `--apply` is passed.
+
+No Gradle task execution. No cascade compile. Safe against broken sibling modules.
+
+### Option 2 — rewrite-gradle-plugin (for small / medium projects)
+
+If your target is not huge and has no pre-existing compile failures, the plugin path still works
+and uses the task-graph-native `rewriteRun` task:
 
 ```bash
-# 1. Dry run — see what would change, nothing is modified
-./gradlew --init-script $RECIPE_REPO/rewrite-init.gradle.kts rewriteDryRun
-
-# 2. Apply for real
-./gradlew --init-script $RECIPE_REPO/rewrite-init.gradle.kts rewriteRun
+./gradlew --init-script $RECIPE_REPO/rewrite-init.gradle.kts \
+    --no-configuration-cache \
+    -Dorg.gradle.unsafe.isolated-projects=false \
+    providerApiMigrate
 ```
 
-### Projects with included builds or buildSrc
+The init script aggregates `rewriteRun` across the primary build and every included build under
+one task called `providerApiMigrate`. Avoid on projects with broken compile tasks or >1000 source
+files — that's when Option 1 pays off.
 
-If the project has an **included build** holding Kotlin / Java build-logic (e.g. junit-framework's
-`gradle/plugins`, or anything registered via `includeBuild`), you need a second invocation using
-the included build's prefix. For **buildSrc**, the prefix is `:buildSrc`:
-
-```bash
-# junit-framework
-./gradlew --init-script $RECIPE_REPO/rewrite-init.gradle.kts rewriteRun :plugins:rewriteRun
-
-# spring-framework
-./gradlew --init-script $RECIPE_REPO/rewrite-init.gradle.kts rewriteRun :buildSrc:rewriteRun
-```
-
-The diff and patch land in `build/reports/rewrite/rewrite.patch`.
+The diff for the plugin path lands in `build/reports/rewrite/rewrite.patch`. The standalone runner
+prints the diff list to stdout and writes changes in-place with `--apply`.
 
 ## The 3-pass workflow
 
@@ -195,10 +212,18 @@ src/main/java/org/gradle/rewrite/providerapi/
     internal/
         MigratedProperties.java           # the catalog (+ hand-curated entries)
         MigratedPropertiesCatalog.java    # auto-generated from gradle2
+        GradleBuildLogic.java             # autodiscovery of build-logic sources
+    tools/
+        StandaloneRunner.java             # main-method for run-migration.sh
+
 src/main/resources/META-INF/rewrite/
     migrate-to-provider-api.yml           # meta-recipe composition order
+
 tools/
     extract_catalog.py                    # scan gradle source → triples
     catalog_to_java.py                    # triples → Java source
-rewrite-init.gradle.kts                   # drop-in init script
+
+discovery-init.gradle.kts                 # configuration-only manifest extractor
+run-migration.sh                          # driver — discovery → filter → runner
+rewrite-init.gradle.kts                   # plugin-path init script
 ```
