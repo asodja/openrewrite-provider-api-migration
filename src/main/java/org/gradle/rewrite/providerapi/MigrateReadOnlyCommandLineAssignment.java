@@ -15,6 +15,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Rewrite {@code exec.commandLine = list} to {@code exec.commandLine(list)} when {@code exec} is an
  * {@code ExecSpec} / {@code Exec} / {@code JavaExec}.
@@ -48,7 +49,7 @@ public class MigrateReadOnlyCommandLineAssignment extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaVisitor<ExecutionContext>() {
             @Override
             public J visitAssignment(J.Assignment assignment, ExecutionContext ctx) {
                 J visited = super.visitAssignment(assignment, ctx);
@@ -121,6 +122,6 @@ public class MigrateReadOnlyCommandLineAssignment extends Recipe {
                 }
                 return null;
             }
-        };
+        });
     }
 }

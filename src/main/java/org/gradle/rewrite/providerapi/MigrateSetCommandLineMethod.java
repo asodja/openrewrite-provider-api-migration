@@ -11,6 +11,7 @@ import org.openrewrite.java.tree.JavaType;
 import java.util.Arrays;
 import java.util.List;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Rename {@code exec.setCommandLine(...)} to {@code exec.commandLine(...)}.
  *
@@ -40,7 +41,7 @@ public class MigrateSetCommandLineMethod extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaIsoVisitor<ExecutionContext>() {
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
@@ -62,6 +63,6 @@ public class MigrateSetCommandLineMethod extends Recipe {
                 return m.withName(m.getName().withSimpleName("commandLine").withType(newType))
                         .withMethodType(newType);
             }
-        };
+        });
     }
 }

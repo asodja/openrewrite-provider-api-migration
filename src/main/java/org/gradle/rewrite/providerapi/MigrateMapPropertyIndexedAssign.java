@@ -16,6 +16,7 @@ import java.util.Collections;
 
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.MAP_PROPERTY_FQN;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Rewrite {@code prop["k"] = v} to {@code prop.put("k", v)} when {@code prop} is a
  * {@code MapProperty<K, V>}.
@@ -39,7 +40,7 @@ public class MigrateMapPropertyIndexedAssign extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaVisitor<ExecutionContext>() {
             @Override
             public J visitAssignment(J.Assignment assignment, ExecutionContext ctx) {
                 J visited = super.visitAssignment(assignment, ctx);
@@ -113,6 +114,6 @@ public class MigrateMapPropertyIndexedAssign extends Recipe {
                 }
                 return null;
             }
-        };
+        });
     }
 }

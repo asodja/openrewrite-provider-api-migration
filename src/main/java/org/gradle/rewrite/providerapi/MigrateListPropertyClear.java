@@ -11,6 +11,7 @@ import static org.gradle.rewrite.providerapi.internal.PropertyTypes.HAS_MULTIPLE
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.LIST_PROPERTY_FQN;
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.SET_PROPERTY_FQN;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Rewrite {@code prop.clear()} to {@code prop.empty()} when {@code prop} is a {@code ListProperty} /
  * {@code SetProperty}.
@@ -30,7 +31,7 @@ public class MigrateListPropertyClear extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaIsoVisitor<ExecutionContext>() {
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
@@ -90,6 +91,6 @@ public class MigrateListPropertyClear extends Recipe {
                 }
                 return null;
             }
-        };
+        });
     }
 }

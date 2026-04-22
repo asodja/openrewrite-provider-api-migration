@@ -14,6 +14,7 @@ import org.openrewrite.kotlin.KotlinVisitor;
 
 import java.util.Collections;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Rewrite {@code deleteTask.delete = x} to {@code deleteTask.targetFiles.setFrom(x)}.
  *
@@ -38,7 +39,7 @@ public class MigrateDeleteTaskToTargetFiles extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new KotlinVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new KotlinVisitor<ExecutionContext>() {
             @Override
             public J visitAssignment(J.Assignment assignment, ExecutionContext ctx) {
                 J.Assignment a = (J.Assignment) super.visitAssignment(assignment, ctx);
@@ -127,6 +128,6 @@ public class MigrateDeleteTaskToTargetFiles extends Recipe {
                 }
                 return null;
             }
-        };
+        });
     }
 }

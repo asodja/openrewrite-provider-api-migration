@@ -15,6 +15,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Flag call sites that mutate a cataloged {@link Kind#MAP_PROPERTY} via methods that don't exist on
  * {@code MapProperty} ({@code remove}, {@code filterKeys}, {@code computeIfAbsent}, etc.).
@@ -43,7 +44,7 @@ public class FlagMapPropertyMutations extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaIsoVisitor<ExecutionContext>() {
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
@@ -105,6 +106,6 @@ public class FlagMapPropertyMutations extends Recipe {
                 }
                 return false;
             }
-        };
+        });
     }
 }

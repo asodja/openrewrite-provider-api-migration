@@ -1,5 +1,6 @@
 package org.gradle.rewrite.providerapi;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
@@ -44,7 +45,7 @@ public class AddKotlinAssignImport extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new KotlinIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new KotlinIsoVisitor<ExecutionContext>() {
             @Override
             public boolean isAcceptable(SourceFile sourceFile, ExecutionContext ctx) {
                 // `.gradle.kts` scripts auto-import the Kotlin DSL bundle (which includes `assign`).
@@ -125,6 +126,6 @@ public class AddKotlinAssignImport extends Recipe {
                 }
                 return false;
             }
-        };
+        });
     }
 }

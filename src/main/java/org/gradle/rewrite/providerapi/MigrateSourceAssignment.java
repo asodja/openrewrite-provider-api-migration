@@ -13,6 +13,7 @@ import org.openrewrite.java.tree.Space;
 
 import java.util.Collections;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Rewrite {@code sourceTask.source = x} to {@code sourceTask.setSource(x)} in Groovy build scripts.
  *
@@ -37,7 +38,7 @@ public class MigrateSourceAssignment extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new GroovyVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new GroovyVisitor<ExecutionContext>() {
             @Override
             public J visitAssignment(J.Assignment assignment, ExecutionContext ctx) {
                 J.Assignment a = (J.Assignment) super.visitAssignment(assignment, ctx);
@@ -100,6 +101,6 @@ public class MigrateSourceAssignment extends Recipe {
                 }
                 return null;
             }
-        };
+        });
     }
 }

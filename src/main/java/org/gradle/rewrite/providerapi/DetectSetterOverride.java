@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Flag custom task subclasses that override a setter which the Provider API migration is removing.
  *
@@ -71,7 +72,7 @@ public class DetectSetterOverride extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaIsoVisitor<ExecutionContext>() {
             @Override
             public J.MethodDeclaration visitMethodDeclaration(J.MethodDeclaration md, ExecutionContext ctx) {
                 J.MethodDeclaration m = super.visitMethodDeclaration(md, ctx);
@@ -107,6 +108,6 @@ public class DetectSetterOverride extends Recipe {
                 }
                 return false;
             }
-        };
+        });
     }
 }

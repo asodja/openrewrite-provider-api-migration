@@ -12,6 +12,7 @@ import org.openrewrite.marker.SearchResult;
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.CONFIGURABLE_FILE_COLLECTION_FQN;
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.FILE_COLLECTION_FQN;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Flag {@code x.setFrom(..., x, ...)} / {@code x.from(..., x, ...)} patterns where a
  * {@code ConfigurableFileCollection} is reset to a value that reads from itself.
@@ -41,7 +42,7 @@ public class DetectSelfReferencingFileCollection extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaIsoVisitor<ExecutionContext>() {
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
@@ -134,6 +135,6 @@ public class DetectSelfReferencingFileCollection extends Recipe {
                 new Finder().visit(expr, found);
                 return found.get();
             }
-        };
+        });
     }
 }

@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Insert {@code .get()} when a cataloged migrated property is used eagerly.
  *
@@ -76,7 +77,7 @@ public class InsertGetOnLazyAccess extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaIsoVisitor<ExecutionContext>() {
 
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
@@ -160,6 +161,6 @@ public class InsertGetOnLazyAccess extends Recipe {
                         null
                 );
             }
-        };
+        });
     }
 }

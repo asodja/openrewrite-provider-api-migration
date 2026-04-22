@@ -16,6 +16,7 @@ import org.openrewrite.java.tree.Space;
 
 import java.util.Collections;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * When a cataloged property became {@link Kind#DIRECTORY_PROPERTY} / {@link Kind#REGULAR_FILE_PROPERTY}
  * and the user chains a {@code File}-shaped call ({@code walkTopDown}, {@code absolutePath},
@@ -37,7 +38,7 @@ public class InsertAsFileGet extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaIsoVisitor<ExecutionContext>() {
 
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
@@ -126,6 +127,6 @@ public class InsertAsFileGet extends Recipe {
                         null
                 );
             }
-        };
+        });
     }
 }

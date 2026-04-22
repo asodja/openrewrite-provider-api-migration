@@ -1,10 +1,12 @@
 package org.gradle.rewrite.providerapi;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties.Kind;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Option;
 import org.openrewrite.Recipe;
+import org.openrewrite.SourceFile;
 import org.openrewrite.TreeVisitor;
 import org.openrewrite.java.JavaIsoVisitor;
 import org.openrewrite.java.MethodMatcher;
@@ -77,6 +79,11 @@ public class MigratePropertySetter extends Recipe {
             this.userMatcher = userMatcher;
             this.expectedKind = expectedKind;
             this.targetMethodName = targetMethodName;
+        }
+
+        @Override
+        public boolean isAcceptable(SourceFile sourceFile, ExecutionContext ctx) {
+            return GradleBuildLogic.isBuildLogic(sourceFile);
         }
 
         @Override

@@ -9,6 +9,7 @@ import org.openrewrite.java.tree.JavaType;
 
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.MAP_PROPERTY_FQN;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Rewrite {@code prop.clear()} to {@code prop.empty()} when {@code prop} is a {@code MapProperty}.
  *
@@ -30,7 +31,7 @@ public class MigrateMapPropertyClear extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaIsoVisitor<ExecutionContext>() {
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
@@ -82,6 +83,6 @@ public class MigrateMapPropertyClear extends Recipe {
                 }
                 return null;
             }
-        };
+        });
     }
 }

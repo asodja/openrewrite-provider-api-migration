@@ -1,6 +1,7 @@
 package org.gradle.rewrite.providerapi;
 
 import org.gradle.rewrite.providerapi.internal.BooleanRenames;
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
@@ -35,7 +36,7 @@ public class RenameKotlinBooleanAccessors extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new KotlinIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new KotlinIsoVisitor<ExecutionContext>() {
             @Override
             public J.FieldAccess visitFieldAccess(J.FieldAccess fa, ExecutionContext ctx) {
                 J.FieldAccess f = super.visitFieldAccess(fa, ctx);
@@ -75,7 +76,7 @@ public class RenameKotlinBooleanAccessors extends Recipe {
                 }
                 return id.withSimpleName(newName);
             }
-        };
+        });
     }
 
     private static String resolveRenameOnHierarchy(JavaType.FullyQualified type, String oldName) {

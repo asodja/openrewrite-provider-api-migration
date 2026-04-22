@@ -13,6 +13,7 @@ import static org.gradle.rewrite.providerapi.internal.PropertyTypes.KOTLIN_PLUS_
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.LIST_PROPERTY_FQN;
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.SET_PROPERTY_FQN;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Add {@code import org.gradle.kotlin.dsl.plusAssign} to {@code .kt} files that use {@code +=} on a
  * {@code HasMultipleValues}-typed property ({@code ListProperty<T>} / {@code SetProperty<T>}).
@@ -36,7 +37,7 @@ public class AddKotlinPlusAssignImport extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new KotlinIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new KotlinIsoVisitor<ExecutionContext>() {
             @Override
             public boolean isAcceptable(SourceFile sourceFile, ExecutionContext ctx) {
                 // `.gradle.kts` scripts auto-import the Kotlin DSL bundle (which includes `plusAssign`).
@@ -86,6 +87,6 @@ public class AddKotlinPlusAssignImport extends Recipe {
                         || LIST_PROPERTY_FQN.equals(n)
                         || SET_PROPERTY_FQN.equals(n);
             }
-        };
+        });
     }
 }

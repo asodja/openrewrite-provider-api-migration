@@ -10,6 +10,7 @@ import org.openrewrite.java.tree.JavaType;
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.LIST_PROPERTY_FQN;
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.SET_PROPERTY_FQN;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Rewrite {@code prop.asList()} / {@code prop.asSet()} to {@code prop.get()} when {@code prop} is a
  * {@code ListProperty} / {@code SetProperty}.
@@ -32,7 +33,7 @@ public class MigrateAsListToGet extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaIsoVisitor<ExecutionContext>() {
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
@@ -91,6 +92,6 @@ public class MigrateAsListToGet extends Recipe {
                 }
                 return null;
             }
-        };
+        });
     }
 }

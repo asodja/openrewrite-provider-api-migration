@@ -17,6 +17,7 @@ import static org.gradle.rewrite.providerapi.internal.PropertyTypes.HAS_MULTIPLE
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.LIST_PROPERTY_FQN;
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.SET_PROPERTY_FQN;
 
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Rewrite {@code prop += v} to {@code prop.add(v)} when {@code prop} is a {@code ListProperty<T>} or
  * {@code SetProperty<T>} (i.e. implements {@code HasMultipleValues}).
@@ -41,7 +42,7 @@ public class MigrateListPropertyPlusAssign extends Recipe {
 
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaVisitor<ExecutionContext>() {
+        return GradleBuildLogic.onlyBuildLogic(new JavaVisitor<ExecutionContext>() {
             @Override
             public J visitAssignmentOperation(J.AssignmentOperation op, ExecutionContext ctx) {
                 J visited = super.visitAssignmentOperation(op, ctx);
@@ -122,6 +123,6 @@ public class MigrateListPropertyPlusAssign extends Recipe {
             private JavaType.FullyQualified asFullyQualified(JavaType t) {
                 return t instanceof JavaType.FullyQualified ? (JavaType.FullyQualified) t : null;
             }
-        };
+        });
     }
 }
