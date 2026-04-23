@@ -51,6 +51,7 @@ recipeList:
   - org.gradle.rewrite.providerapi.MigrateMapPropertyClear
   - org.gradle.rewrite.providerapi.MigrateMapPropertyIndexedAssign
   - org.gradle.rewrite.providerapi.MigratePropertyMutations
+  - org.gradle.rewrite.providerapi.MigrateScalarPropertySelfReference
   - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
   - org.gradle.rewrite.providerapi.InsertAsFileGet
 
@@ -85,6 +86,7 @@ recipeList:
   - org.gradle.rewrite.providerapi.MigrateMapPropertyClear
   - org.gradle.rewrite.providerapi.MigrateMapPropertyIndexedAssign
   - org.gradle.rewrite.providerapi.MigratePropertyMutations
+  - org.gradle.rewrite.providerapi.MigrateScalarPropertySelfReference
   - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
   - org.gradle.rewrite.providerapi.InsertAsFileGet
   - org.gradle.rewrite.providerapi.DetectSelfReferencingFileCollection
