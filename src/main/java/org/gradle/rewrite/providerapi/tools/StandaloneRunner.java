@@ -151,6 +151,13 @@ public final class StandaloneRunner {
         }
 
         ExecutionContext ctx = new InMemoryExecutionContext(Throwable::printStackTrace);
+        // Disable OpenRewrite's built-in print-idempotency check (Parser.requirePrintEqualsInput).
+        // rewrite-java 8.80.0 has deterministic Javadoc reprint bugs — multi-line `@param` blocks
+        // collapse onto one line, whitespace around `{@code}` tags shifts, etc. With the check on,
+        // any file tripping the bug becomes a ParseError and is silently skipped by recipes. With
+        // it off, we get a real J.CompilationUnit, recipes can fire on the code, and any Javadoc
+        // noise shows up visibly in the rewrite diff for the user to review before `--apply`.
+        ctx.putMessage("org.openrewrite.requirePrintEqualsInput", false);
 
         List<SourceFile> sources = new ArrayList<>();
 
@@ -200,6 +207,26 @@ public final class StandaloneRunner {
             return 0;
         }
 
+        // Flag sources whose reparse doesn't match the original bytes — rewrite-java 8.80.0 has
+        // Javadoc reprint bugs that silently corrupt `{@code}` whitespace and `@param` line breaks.
+        // With the idempotency check disabled above, these files now parse and recipes fire on
+        // their code, but if we write changes, the output will include the Javadoc noise.
+        List<Path> nonIdempotentSources = new ArrayList<>();
+        for (SourceFile sf : sources) {
+            if (sf instanceof org.openrewrite.tree.ParseError) continue;
+            Path sourcePath = sf.getSourcePath();
+            Path onDisk = sourcePath.isAbsolute() ? sourcePath : sourcePath.toAbsolutePath();
+            if (!Files.isRegularFile(onDisk)) continue;
+            try {
+                String original = new String(Files.readAllBytes(onDisk), StandardCharsets.UTF_8);
+                if (!original.equals(sf.printAll())) {
+                    nonIdempotentSources.add(onDisk);
+                }
+            } catch (IOException ignored) {
+                // Can't read original bytes; skip the check.
+            }
+        }
+
         Environment env = Environment.builder().scanRuntimeClasspath().build();
         Recipe recipe = env.activateRecipes(recipeName);
         if (recipe.getRecipeList().isEmpty() && !recipeName.startsWith("org.openrewrite.")) {
@@ -239,6 +266,14 @@ public final class StandaloneRunner {
         }
         System.out.println(String.format("[rewrite-runner] %d files with changes (%s)",
                 changed, apply ? "applied" : "dry run — pass --apply to write"));
+        if (!nonIdempotentSources.isEmpty()) {
+            System.out.println("[rewrite-runner] WARN: " + nonIdempotentSources.size() +
+                    " file(s) had non-idempotent parses (rewrite-java 8.80.0 Javadoc bug). Review" +
+                    " Javadoc changes in these files before committing:");
+            for (Path p : nonIdempotentSources) {
+                System.out.println("    " + p);
+            }
+        }
         return 0;
     }
 
