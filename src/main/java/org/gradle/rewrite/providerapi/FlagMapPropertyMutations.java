@@ -1,5 +1,7 @@
 package org.gradle.rewrite.providerapi;
 
+import org.gradle.rewrite.providerapi.internal.Advisor;
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties.Kind;
 import org.openrewrite.ExecutionContext;
@@ -9,20 +11,18 @@ import org.openrewrite.java.JavaIsoVisitor;
 import org.openrewrite.java.tree.Expression;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.JavaType;
-import org.openrewrite.marker.SearchResult;
 
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Flag call sites that mutate a cataloged {@link Kind#MAP_PROPERTY} via methods that don't exist on
  * {@code MapProperty} ({@code remove}, {@code filterKeys}, {@code computeIfAbsent}, etc.).
  *
  * <p>No mechanical rewrite — these patterns require a "copy-mutate-set" refactor the user must write
- * (see MIGRATION-ANALYSIS.md §4(g)). This recipe attaches a {@link SearchResult} marker so each site
- * shows up as a TODO in the rewrite diff.
+ * (see MIGRATION-ANALYSIS.md §4(g)). This recipe prepends a multi-line {@code TODO:} block comment
+ * via {@link Advisor#addTodo(J, String)} so each site shows up as a readable migration note.
  */
 public class FlagMapPropertyMutations extends Recipe {
 
@@ -62,13 +62,18 @@ public class FlagMapPropertyMutations extends Recipe {
                 String call = m.getSimpleName();
                 String argsRender = renderArgs(m);
                 String message =
-                        "MapProperty does not support `" + call + "(...)`. Replace with the " +
-                        "copy-mutate-set pattern: `val updated = " + receiverLabel + ".get()" +
-                        ".toMutableMap(); updated." + call + "(" + argsRender + "); " +
-                        receiverLabel + ".set(updated)`. Internal-API alternative (fragile): " +
-                        "`(" + receiverLabel + " as DefaultMapProperty<*, *>).replace { " +
-                        "it.map { m -> m.toMutableMap().apply { " + call + "(" + argsRender + ") } } }`.";
-                return SearchResult.found(m, message);
+                        "MapProperty does not support `" + call + "(...)`.\n" +
+                        "\n" +
+                        "Copy-mutate-set replacement (Kotlin):\n" +
+                        "    val updated = " + receiverLabel + ".get().toMutableMap()\n" +
+                        "    updated." + call + "(" + argsRender + ")\n" +
+                        "    " + receiverLabel + ".set(updated)\n" +
+                        "\n" +
+                        "Internal-API alternative (fragile, not recommended):\n" +
+                        "    (" + receiverLabel + " as DefaultMapProperty<*, *>).replace {\n" +
+                        "        it.map { m -> m.toMutableMap().apply { " + call + "(" + argsRender + ") } }\n" +
+                        "    }";
+                return Advisor.addTodo(m, message);
             }
 
             private String renderReceiver(Expression select) {

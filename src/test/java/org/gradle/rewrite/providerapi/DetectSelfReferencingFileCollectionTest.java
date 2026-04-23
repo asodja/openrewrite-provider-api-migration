@@ -9,15 +9,6 @@ import static org.openrewrite.java.Assertions.java;
 
 class DetectSelfReferencingFileCollectionTest implements RewriteTest {
 
-    private static final String MARKER = "Self-referencing ConfigurableFileCollection: " +
-            "`classpath.setFrom(...)` reads `classpath` on the RHS. Evaluation is deferred, so " +
-            "this loops back to an empty collection or deadlocks. Replace with: " +
-            "`classpath.from(extra)` (additive intent, preferred), OR " +
-            "`val prev = classpath.files; classpath.setFrom(); classpath.from(prev, extra)` " +
-            "(capture-then-rebuild), OR " +
-            "`(classpath as DefaultConfigurableFileCollection).replace { it + extra }` " +
-            "(Gradle internal API, fragile).";
-
     @Override
     public void defaults(RecipeSpec spec) {
         spec.recipe(new DetectSelfReferencingFileCollection())
@@ -37,7 +28,21 @@ class DetectSelfReferencingFileCollectionTest implements RewriteTest {
                         "import org.gradle.api.file.ConfigurableFileCollection;\n" +
                         "class Build {\n" +
                         "    void cfg(ConfigurableFileCollection classpath, Object extra) {\n" +
-                        "        /*~~(" + MARKER + ")~~>*/classpath.setFrom(extra, classpath);\n" +
+                        "        /*\n" +
+                        "         * TODO: Self-referencing ConfigurableFileCollection.\n" +
+                        "         * `classpath.setFrom(...)` reads `classpath` on the RHS. Evaluation is deferred, so this loops back to an empty collection or deadlocks.\n" +
+                        "         * \n" +
+                        "         * Replacement options:\n" +
+                        "         *   1. Additive (preferred if that's the intent):\n" +
+                        "         *          classpath.from(extra)\n" +
+                        "         *   2. Capture-then-rebuild:\n" +
+                        "         *          val prev = classpath.files\n" +
+                        "         *          classpath.setFrom()\n" +
+                        "         *          classpath.from(prev, extra)\n" +
+                        "         *   3. Internal-API (fragile, not recommended):\n" +
+                        "         *          (classpath as DefaultConfigurableFileCollection).replace { it + extra }\n" +
+                        "         */\n" +
+                        "        classpath.setFrom(extra, classpath);\n" +
                         "    }\n" +
                         "}\n"
                 )

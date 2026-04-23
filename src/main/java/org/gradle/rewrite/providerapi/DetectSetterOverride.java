@@ -1,18 +1,17 @@
 package org.gradle.rewrite.providerapi;
 
+import org.gradle.rewrite.providerapi.internal.Advisor;
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
 import org.openrewrite.java.JavaIsoVisitor;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.JavaType;
-import org.openrewrite.marker.SearchResult;
 
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
-
-import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Flag custom task subclasses that override a setter which the Provider API migration is removing.
  *
@@ -22,8 +21,9 @@ import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
  * {@code Property} convention. Because this is a semantic-preserving move the recipe catalog treats it
  * as advisor-only (no mechanical rewrite).
  *
- * <p>This recipe attaches a {@link SearchResult} marker to any {@code set*} method in a class that
- * extends a known Gradle base whose same-named setter was removed.
+ * <p>This recipe prepends a multi-line {@code TODO:} block comment via
+ * {@link Advisor#addTodo(J, String)} to any {@code set*} method in a class that extends a known
+ * Gradle base whose same-named setter was removed.
  */
 public class DetectSetterOverride extends Recipe {
 
@@ -96,13 +96,18 @@ public class DetectSetterOverride extends Recipe {
                 String getterName = "get" + name.substring(3);
                 String parentFqn = fq.getFullyQualifiedName();
                 String message =
-                        "Override of `" + name + "` on subclass of `" + parentFqn + "` — the Provider API " +
-                        "migration removes this setter, so the override is orphaned. Options: " +
-                        "(1) move the logic to each call site, or " +
-                        "(2) configure `" + getterName + "().convention(...)` in the subclass constructor to preserve defaults, or " +
-                        "(3) lift preprocessing into `" + getterName + "().finalizeValueOnRead()` plus a " +
-                        "transform provider. Remove the `" + name + "(...)` method once callers are updated.";
-                return SearchResult.found(m, message);
+                        "Override of `" + name + "` on subclass of `" + parentFqn + "`.\n" +
+                        "The Provider API migration removes this setter, so the override is orphaned.\n" +
+                        "\n" +
+                        "Options:\n" +
+                        "  1. Move the logic to each call site.\n" +
+                        "  2. Configure `" + getterName + "().convention(...)` in the subclass constructor\n" +
+                        "     to preserve defaults.\n" +
+                        "  3. Lift preprocessing into `" + getterName + "().finalizeValueOnRead()` plus a\n" +
+                        "     transform provider.\n" +
+                        "\n" +
+                        "Remove the `" + name + "(...)` method once callers are updated.";
+                return Advisor.addTodo(m, message);
             }
 
             private boolean extendsWatched(JavaType.FullyQualified fq) {

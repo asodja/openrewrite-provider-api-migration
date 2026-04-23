@@ -1,5 +1,7 @@
 package org.gradle.rewrite.providerapi;
 
+import org.gradle.rewrite.providerapi.internal.Advisor;
+import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
@@ -7,12 +9,9 @@ import org.openrewrite.java.JavaIsoVisitor;
 import org.openrewrite.java.tree.Expression;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.JavaType;
-import org.openrewrite.marker.SearchResult;
 
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.CONFIGURABLE_FILE_COLLECTION_FQN;
 import static org.gradle.rewrite.providerapi.internal.PropertyTypes.FILE_COLLECTION_FQN;
-
-import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 /**
  * Flag {@code x.setFrom(..., x, ...)} / {@code x.from(..., x, ...)} patterns where a
  * {@code ConfigurableFileCollection} is reset to a value that reads from itself.
@@ -23,8 +22,9 @@ import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
  * (Tier 3, advisor-only): either switch to append-safe {@code .from(extra)} if intent was additive, or
  * capture the current value into a local before re-assigning.
  *
- * <p>This recipe attaches a {@link SearchResult} marker to each offending call site. Users see the
- * markers as inline TODO comments in the diff and decide case-by-case.
+ * <p>This recipe prepends a multi-line {@code TODO:} block comment via
+ * {@link Advisor#addTodo(J, String)} to each offending call site so users see a readable migration
+ * note in the diff and decide case-by-case.
  */
 public class DetectSelfReferencingFileCollection extends Recipe {
 
@@ -63,15 +63,21 @@ public class DetectSelfReferencingFileCollection extends Recipe {
                 for (Expression arg : m.getArguments()) {
                     if (referencesName(arg, receiverKey)) {
                         String message =
-                                "Self-referencing ConfigurableFileCollection: `" + receiverKey + "." + name +
-                                "(...)` reads `" + receiverKey + "` on the RHS. Evaluation is deferred, so " +
-                                "this loops back to an empty collection or deadlocks. Replace with: " +
-                                "`" + receiverKey + ".from(extra)` (additive intent, preferred), OR " +
-                                "`val prev = " + receiverKey + ".files; " + receiverKey + ".setFrom(); " +
-                                receiverKey + ".from(prev, extra)` (capture-then-rebuild), OR " +
-                                "`(" + receiverKey + " as DefaultConfigurableFileCollection).replace { it + extra }` " +
-                                "(Gradle internal API, fragile).";
-                        return SearchResult.found(m, message);
+                                "Self-referencing ConfigurableFileCollection.\n" +
+                                "`" + receiverKey + "." + name + "(...)` reads `" + receiverKey + "` on the" +
+                                " RHS. Evaluation is deferred, so this loops back to an empty collection" +
+                                " or deadlocks.\n" +
+                                "\n" +
+                                "Replacement options:\n" +
+                                "  1. Additive (preferred if that's the intent):\n" +
+                                "         " + receiverKey + ".from(extra)\n" +
+                                "  2. Capture-then-rebuild:\n" +
+                                "         val prev = " + receiverKey + ".files\n" +
+                                "         " + receiverKey + ".setFrom()\n" +
+                                "         " + receiverKey + ".from(prev, extra)\n" +
+                                "  3. Internal-API (fragile, not recommended):\n" +
+                                "         (" + receiverKey + " as DefaultConfigurableFileCollection).replace { it + extra }";
+                        return Advisor.addTodo(m, message);
                     }
                 }
                 return m;
