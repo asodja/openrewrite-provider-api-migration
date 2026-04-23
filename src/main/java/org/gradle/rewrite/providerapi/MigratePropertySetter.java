@@ -1,6 +1,7 @@
 package org.gradle.rewrite.providerapi;
 
 import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
+import org.gradle.rewrite.providerapi.internal.KotlinDslScope;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties.Kind;
 import org.openrewrite.ExecutionContext;
@@ -110,13 +111,23 @@ public class MigratePropertySetter extends Recipe {
 
             JavaType.FullyQualified declaring = resolveDeclaring(setterType, m.getSelect());
             Kind kind = MigratedProperties.lookup(declaring, propName);
-            // No name-only fallback. We previously had one for implicit-this calls inside
-            // .gradle.kts closures (e.g. setMaxMemory("1g") inside tasks.javadoc { }), but it caused
-            // false positives when a property name appeared in the catalog on ONE type and the
-            // actual receiver was a DIFFERENT type — e.g. setIncludes(listOf(...)) inside
-            // tasks.register<Test> { }. Catalog has `includes` as LIST_PROPERTY on
-            // JacocoTaskExtension but Test.includes is still Set<String>. The safe stance is:
-            // only rewrite when we can confirm the receiver's declaring type from the LST.
+            if (kind == null && m.getSelect() == null) {
+                // Bare implicit-this setter inside a .gradle.kts DSL lambda where rewrite-kotlin
+                // couldn't attribute the enclosing receiver (openrewrite/rewrite#6312). Fall back
+                // to walking the cursor for an enclosing typed DSL scope like
+                // `tasks.withType<Javadoc> { }` or `tasks.registering(Javadoc::class) { }`, then
+                // resolve via the catalog's simple-name lookup. The simple-name lookup returns
+                // null on ambiguity, keeping the old false-positive pattern (setIncludes on Test
+                // matching JacocoTaskExtension.includes) safe.
+                //
+                // Gated on `getSelect() == null` — we DON'T apply this fallback when there's an
+                // explicit receiver chain whose type happens to be unresolved, because that would
+                // wrongly substitute the outer scope's receiver for an unrelated chain.
+                String scopeSimple = KotlinDslScope.findEnclosingTypedScope(getCursor());
+                if (scopeSimple != null) {
+                    kind = MigratedProperties.lookupBySimpleName(scopeSimple, propName);
+                }
+            }
             if (kind != expectedKind) {
                 return m;
             }

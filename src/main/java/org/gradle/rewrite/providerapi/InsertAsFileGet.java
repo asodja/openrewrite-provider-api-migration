@@ -1,5 +1,6 @@
 package org.gradle.rewrite.providerapi;
 
+import org.gradle.rewrite.providerapi.internal.KotlinDslScope;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties.Kind;
 import org.openrewrite.ExecutionContext;
@@ -42,6 +43,12 @@ public class InsertAsFileGet extends Recipe {
 
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
+                // Don't descend into the `.get()` invocation we ourselves inserted on a previous
+                // cycle — otherwise we'd re-wrap `destinationDir` inside `destinationDir.get()`
+                // and end up with `destinationDir.get().asFile.get().asFile.walkTopDown()`.
+                if (isNoArgGet(method)) {
+                    return method;
+                }
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
                 if (m.getSelect() == null) {
                     return m;
@@ -51,6 +58,12 @@ public class InsertAsFileGet extends Recipe {
                     return m;
                 }
                 return m.withSelect(newSelect);
+            }
+
+            private boolean isNoArgGet(J.MethodInvocation m) {
+                if (!"get".equals(m.getSimpleName())) return false;
+                return m.getArguments().isEmpty()
+                        || (m.getArguments().size() == 1 && m.getArguments().get(0) instanceof J.Empty);
             }
 
             @Override
@@ -64,14 +77,23 @@ public class InsertAsFileGet extends Recipe {
             }
 
             private Expression maybeWrap(Expression expr) {
+                // Peel Kotlin `!!` non-null assertion first — `destinationDir!!.walkTopDown()`
+                // should rewrite as if it were `destinationDir.walkTopDown()` (the `.get()`
+                // return value is non-null, so `!!` is redundant after rewrite).
+                Expression actual = unwrapNotNullAssertion(expr);
+
                 String propName;
                 Expression receiver;
-                if (expr instanceof J.FieldAccess) {
-                    J.FieldAccess fa = (J.FieldAccess) expr;
+                if (actual instanceof J.FieldAccess) {
+                    J.FieldAccess fa = (J.FieldAccess) actual;
                     propName = fa.getName().getSimpleName();
                     receiver = fa.getTarget();
-                } else if (expr instanceof J.MethodInvocation) {
-                    J.MethodInvocation mi = (J.MethodInvocation) expr;
+                } else if (actual instanceof J.Identifier) {
+                    // Bare identifier — implicit-this access inside a Kotlin DSL lambda.
+                    propName = ((J.Identifier) actual).getSimpleName();
+                    receiver = null;
+                } else if (actual instanceof J.MethodInvocation) {
+                    J.MethodInvocation mi = (J.MethodInvocation) actual;
                     String name = mi.getSimpleName();
                     if (!name.startsWith("get") || name.length() <= 3
                             || !Character.isUpperCase(name.charAt(3))) {
@@ -86,16 +108,35 @@ public class InsertAsFileGet extends Recipe {
                 } else {
                     return expr;
                 }
-                if (receiver == null) {
-                    return expr;
+                Kind kind = null;
+                if (receiver != null) {
+                    JavaType.FullyQualified receiverFq = receiver.getType() instanceof JavaType.FullyQualified
+                            ? (JavaType.FullyQualified) receiver.getType() : null;
+                    kind = MigratedProperties.lookup(receiverFq, propName);
+                } else {
+                    // Scope fallback only for bare identifiers — see InsertGetOnLazyAccess for why
+                    // an explicit chain with a null type should NOT steal the outer scope's receiver.
+                    String scopeSimple = KotlinDslScope.findEnclosingTypedScope(getCursor());
+                    if (scopeSimple != null) {
+                        kind = MigratedProperties.lookupBySimpleName(scopeSimple, propName);
+                    }
                 }
-                JavaType.FullyQualified receiverFq = receiver.getType() instanceof JavaType.FullyQualified
-                        ? (JavaType.FullyQualified) receiver.getType() : null;
-                Kind kind = MigratedProperties.lookup(receiverFq, propName);
                 if (kind != Kind.DIRECTORY_PROPERTY && kind != Kind.REGULAR_FILE_PROPERTY) {
                     return expr;
                 }
-                return wrapWithGetAsFile(expr);
+                // Wrap the UN-peeled expression — drops the `!!` along the way.
+                return wrapWithGetAsFile(actual);
+            }
+
+            /** Peel one level of Kotlin {@code !!} non-null assertion, if present. */
+            private Expression unwrapNotNullAssertion(Expression expr) {
+                if (expr instanceof org.openrewrite.kotlin.tree.K.Unary) {
+                    org.openrewrite.kotlin.tree.K.Unary u = (org.openrewrite.kotlin.tree.K.Unary) expr;
+                    if (u.getOperator() == org.openrewrite.kotlin.tree.K.Unary.Type.NotNull) {
+                        return u.getExpression();
+                    }
+                }
+                return expr;
             }
 
             /** Build {@code expr.get().asFile}. */

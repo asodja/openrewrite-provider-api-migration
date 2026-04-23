@@ -282,6 +282,43 @@ public final class MigratedProperties {
     }
 
     /**
+     * Look up the {@link Kind} for a property when we know the declaring type only by its
+     * <em>simple</em> name — e.g. {@code "Javadoc"} extracted from a DSL scope like
+     * {@code tasks.withType<Javadoc> { ... }}. Scans the catalog for every FQN whose last
+     * segment matches {@code simpleName}; returns a non-null {@link Kind} only if every such
+     * entry agrees on the same kind. Disagreement (two types share a simple name but one has
+     * the property as {@code LIST_PROPERTY} and the other as {@code SET_PROPERTY}) returns
+     * {@code null} so the caller doesn't make a wrong-kind rewrite.
+     *
+     * <p>Pairs with the cursor-walk heuristic in {@link KotlinDslScope} for Kotlin {@code .gradle.kts}
+     * files where rewrite-kotlin can't attribute the implicit receiver type.
+     */
+    public static Kind lookupBySimpleName(String simpleName, String propertyName) {
+        if (simpleName == null || propertyName == null) {
+            return null;
+        }
+        Kind agreed = null;
+        for (Map.Entry<String, Map<String, Kind>> entry : TABLE.entrySet()) {
+            String fqn = entry.getKey();
+            int idx = fqn.lastIndexOf('.');
+            String simple = idx < 0 ? fqn : fqn.substring(idx + 1);
+            if (!simple.equals(simpleName)) {
+                continue;
+            }
+            Kind k = entry.getValue().get(propertyName);
+            if (k == null) {
+                continue;
+            }
+            if (agreed == null) {
+                agreed = k;
+            } else if (agreed != k) {
+                return null; // simple-name collision with differing kinds — bail
+            }
+        }
+        return agreed;
+    }
+
+    /**
      * Name-only fallback that returns a {@link Kind} only if <em>every</em> cataloged entry for
      * {@code propertyName} agrees on the same kind. Used when the declaring type can't be resolved
      * on the classpath — most commonly for implicit-{@code this} calls inside Kotlin DSL blocks like

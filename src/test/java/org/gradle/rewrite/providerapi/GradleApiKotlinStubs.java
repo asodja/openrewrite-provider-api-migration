@@ -97,6 +97,32 @@ public final class GradleApiKotlinStubs {
             "    abstract fun getTargetFiles(): ConfigurableFileCollection\n" +
             "}\n";
 
+    public static final String DIRECTORY_PROPERTY =
+            "package org.gradle.api.file\n" +
+            "import org.gradle.api.provider.Provider\n" +
+            "interface RegularFile { fun getAsFile(): java.io.File }\n" +
+            "interface Directory { fun getAsFile(): java.io.File }\n" +
+            "interface RegularFileProperty {\n" +
+            "    fun get(): RegularFile\n" +
+            "    fun set(value: java.io.File)\n" +
+            "    fun getAsFile(): Provider<java.io.File>\n" +
+            "}\n" +
+            "interface DirectoryProperty {\n" +
+            "    fun get(): Directory\n" +
+            "    fun set(value: java.io.File)\n" +
+            "    fun getAsFile(): Provider<java.io.File>\n" +
+            "}\n";
+
+    public static final String JAVADOC_TASK =
+            "package org.gradle.api.tasks.javadoc\n" +
+            "import org.gradle.api.provider.Property\n" +
+            "import org.gradle.api.file.RegularFileProperty\n" +
+            "abstract class Javadoc {\n" +
+            "    abstract fun getMaxMemory(): Property<String>\n" +
+            "    abstract fun setMaxMemory(value: String)\n" +
+            "    abstract fun getDestinationDir(): RegularFileProperty\n" +
+            "}\n";
+
     public static final String JAR_TASK =
             "package org.gradle.api.tasks.bundling\n" +
             "import org.gradle.api.provider.Property\n" +
@@ -118,7 +144,9 @@ public final class GradleApiKotlinStubs {
             LIST_PROPERTY,
             MAP_PROPERTY,
             CONFIGURABLE_FILE_COLLECTION,
+            DIRECTORY_PROPERTY,
             TEST_TASK,
+            JAVADOC_TASK,
             EXEC_SPEC,
             DELETE_TASK,
             JAR_TASK,
