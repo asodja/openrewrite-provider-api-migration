@@ -43,11 +43,24 @@ fi
 # --- 2. discovery: extract manifest
 echo "[run-migration] discovering source sets..."
 rm -f "$TARGET/.rewrite-manifest.json"
-# The discovery init-script throws on purpose to abort before task execution; we swallow the exit.
-(cd "$TARGET" && ./gradlew --init-script "$HERE/discovery-init.gradle.kts" help 2>&1 \
-    | grep -E '^\[rewrite-discovery\]' || true)
+# The discovery init-script throws on purpose to abort before task execution. That's a "normal"
+# failure. Real Gradle failures (JDK mismatch, unresolved dependency in settings.gradle, etc.)
+# also end in a failed build — they look identical on exit code, so we rely on the manifest file
+# being produced as the success signal. Full output is captured to a tmpfile; on failure we show
+# the last 30 lines so the user can see what actually went wrong (wrong JDK is the common one).
+DISCOVERY_LOG="$(mktemp -t rewrite-discovery.XXXXXX.log)"
+(cd "$TARGET" && ./gradlew --init-script "$HERE/discovery-init.gradle.kts" help) > "$DISCOVERY_LOG" 2>&1 || true
+grep -E '^\[rewrite-discovery\]' "$DISCOVERY_LOG" || true
 if [ ! -f "$TARGET/.rewrite-manifest.json" ]; then
     echo "[run-migration] ERROR: discovery did not produce .rewrite-manifest.json"
+    echo "[run-migration] last 30 lines of Gradle output (full log at $DISCOVERY_LOG):"
+    tail -30 "$DISCOVERY_LOG" | sed 's/^/    /'
+    echo ""
+    echo "[run-migration] Common causes:"
+    echo "    - Wrong JDK. The target project's Gradle may need a different Java version"
+    echo "      (e.g. 'error: 25.0.2' → target needs JDK <=16 for Gradle 7.x)."
+    echo "      Set JAVA_HOME to a compatible JDK and retry."
+    echo "    - Unresolved plugins/deps in settings.gradle or the root build script."
     exit 3
 fi
 

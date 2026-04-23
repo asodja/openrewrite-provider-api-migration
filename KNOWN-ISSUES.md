@@ -203,7 +203,35 @@ non-Gradle" collisions. Both add complexity for marginal benefit.
 
 ## Infrastructure
 
-### Nothing to carry over right now.
+### Discovery fails with "25.0.2" (or similar bare version number)
 
-*(Add an entry here if a runner-level limitation — not a recipe precision
-call — bites a real codebase.)*
+**Symptom.** Running `./run-migration.sh <target>` exits early with:
+
+```
+[run-migration] ERROR: discovery did not produce .rewrite-manifest.json
+[run-migration] last 30 lines of Gradle output:
+    FAILURE: Build failed with an exception.
+    * What went wrong:
+    25.0.2
+```
+
+**Root cause.** JDK / Gradle version mismatch. Gradle 7.x doesn't run on
+JDK 17+; Gradle 8.0–8.4 doesn't run on JDK 21+; Gradle 8.5+ on JDK 21; etc.
+The bare version number in the error message is the JDK that can't be
+loaded. Seen on elasticsearch (Gradle 7.2) with JDK 25.
+
+**Workaround.** Point `JAVA_HOME` at a compatible JDK before running:
+
+```
+JAVA_HOME=/path/to/jdk-16 ./run-migration.sh <target>
+```
+
+Mapping:
+- Gradle 7.0–7.2 → JDK 8–16
+- Gradle 7.3–7.5 → JDK 8–17
+- Gradle 8.0–8.4 → JDK 8–20
+- Gradle 8.5+    → JDK 8–21
+
+**Fix.** Runner could use `./gradlew -Dorg.gradle.java.home=...` to bypass
+`JAVA_HOME`, but then the user has to know which JDK to point at. The
+current error surfacing is already pretty direct.
