@@ -174,12 +174,51 @@ public final class StandaloneRunner {
             if (verbose) System.out.println("[rewrite-runner] parsed " + javaFiles.size() + " java files");
         }
         if (!kotlinFiles.isEmpty()) {
-            KotlinParser kparser = KotlinParser.builder()
-                    .classpath(cpList)
-                    .logCompilationWarningsAndErrors(false)
-                    .build();
-            kparser.parse(kotlinFiles, null, ctx).forEach(sources::add);
-            if (verbose) System.out.println("[rewrite-runner] parsed " + kotlinFiles.size() + " kotlin files");
+            // Split into script vs plain .kt. Gradle .kts files need Kotlin's script-compilation mode
+            // so the implicit receiver (Project / Settings / Gradle) resolves — without it, every
+            // `tasks.withType<T>()`, `configureEach`, `registering`, etc. comes back with null type
+            // attribution and catalog-driven recipes can't fire. See openrewrite/rewrite#6312.
+            List<Path> plainKt = new ArrayList<>();
+            List<Path> projectScripts = new ArrayList<>();
+            List<Path> settingsScripts = new ArrayList<>();
+            List<Path> initScripts = new ArrayList<>();
+            for (Path p : kotlinFiles) {
+                String name = p.getFileName().toString();
+                if (name.equals("settings.gradle.kts") || name.endsWith(".settings.gradle.kts")) {
+                    settingsScripts.add(p);
+                } else if (name.equals("init.gradle.kts") || name.endsWith(".init.gradle.kts")) {
+                    initScripts.add(p);
+                } else if (name.endsWith(".gradle.kts")) {
+                    projectScripts.add(p);
+                } else {
+                    plainKt.add(p);
+                }
+            }
+            if (!plainKt.isEmpty()) {
+                KotlinParser kparser = KotlinParser.builder()
+                        .classpath(cpList)
+                        .logCompilationWarningsAndErrors(false)
+                        .build();
+                kparser.parse(plainKt, null, ctx).forEach(sources::add);
+            }
+            if (!projectScripts.isEmpty()) {
+                buildScriptParser(cpList, "org.gradle.api.Project")
+                        .parse(projectScripts, null, ctx).forEach(sources::add);
+            }
+            if (!settingsScripts.isEmpty()) {
+                buildScriptParser(cpList, "org.gradle.api.initialization.Settings")
+                        .parse(settingsScripts, null, ctx).forEach(sources::add);
+            }
+            if (!initScripts.isEmpty()) {
+                buildScriptParser(cpList, "org.gradle.api.invocation.Gradle")
+                        .parse(initScripts, null, ctx).forEach(sources::add);
+            }
+            if (verbose) {
+                System.out.println("[rewrite-runner] parsed " + kotlinFiles.size() +
+                        " kotlin files (" + plainKt.size() + " plain, " +
+                        projectScripts.size() + " project .gradle.kts, " +
+                        settingsScripts.size() + " settings, " + initScripts.size() + " init)");
+            }
         }
         if (!groovyFiles.isEmpty()) {
             // rewrite-groovy's GroovyParser takes classpath too. Loading it reflectively avoids a
@@ -275,6 +314,52 @@ public final class StandaloneRunner {
             }
         }
         return 0;
+    }
+
+    /**
+     * Default imports applied to every Kotlin script parse — mirrors the set Gradle injects when
+     * compiling {@code .gradle.kts} files. Without these, unqualified references like {@code Test}
+     * or {@code Javadoc} wouldn't resolve even with the correct implicit receiver set.
+     */
+    private static final String[] GRADLE_SCRIPT_DEFAULT_IMPORTS = {
+            "org.gradle.*",
+            "org.gradle.api.*",
+            "org.gradle.api.artifacts.*",
+            "org.gradle.api.artifacts.dsl.*",
+            "org.gradle.api.attributes.*",
+            "org.gradle.api.component.*",
+            "org.gradle.api.file.*",
+            "org.gradle.api.initialization.*",
+            "org.gradle.api.invocation.*",
+            "org.gradle.api.logging.*",
+            "org.gradle.api.model.*",
+            "org.gradle.api.plugins.*",
+            "org.gradle.api.provider.*",
+            "org.gradle.api.publish.*",
+            "org.gradle.api.resources.*",
+            "org.gradle.api.services.*",
+            "org.gradle.api.specs.*",
+            "org.gradle.api.tasks.*",
+            "org.gradle.api.tasks.bundling.*",
+            "org.gradle.api.tasks.compile.*",
+            "org.gradle.api.tasks.javadoc.*",
+            "org.gradle.api.tasks.testing.*",
+            "org.gradle.external.javadoc.*",
+            "org.gradle.jvm.*",
+            "org.gradle.jvm.toolchain.*",
+            "org.gradle.plugin.use.*",
+            "org.gradle.process.*",
+            "org.gradle.kotlin.dsl.*",
+    };
+
+    private static KotlinParser buildScriptParser(List<Path> cpList, String implicitReceiverFqn) {
+        return KotlinParser.builder()
+                .classpath(cpList)
+                .isKotlinScript(true)
+                .scriptImplicitReceivers(implicitReceiverFqn)
+                .scriptDefaultImports(GRADLE_SCRIPT_DEFAULT_IMPORTS)
+                .logCompilationWarningsAndErrors(false)
+                .build();
     }
 
     private static void classify(Path p, List<Path> javaFiles, List<Path> kotlinFiles, List<Path> groovyFiles) {
