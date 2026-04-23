@@ -120,35 +120,46 @@ public class MigratePropertyMutations extends Recipe {
                 if (!isUnsupportedForAnyKind(methodName)) {
                     return m;
                 }
-                Kind kind = resolveReceiverKind(select, methodName);
-                if (kind == null) {
+                Match match = resolveReceiverKind(select, methodName);
+                if (match == null) {
                     return m;
                 }
-                Set<String> unsupportedForKind = UNSUPPORTED.get(kind);
+                Set<String> unsupportedForKind = UNSUPPORTED.get(match.kind);
                 if (unsupportedForKind == null || !unsupportedForKind.contains(methodName)) {
                     return m;
                 }
                 SourceFile sourceFile = getCursor().firstEnclosing(SourceFile.class);
-                if (GradleBuildLogic.isKotlin(sourceFile)) {
-                    return rewriteAsReplaceBlock(m, kind, getCursor());
+                if (match.confident && GradleBuildLogic.isKotlin(sourceFile)) {
+                    return rewriteAsReplaceBlock(m, match.kind, getCursor());
                 }
-                return Advisor.addTodo(m, adviceMessage(m, kind, getCursor()));
+                // Non-confident match OR Java source — leave a TODO advisor so the user can
+                // review case-by-case. For candidate matches this is essential: the receiver
+                // might be an unrelated third-party property that collides on name (e.g.
+                // Shadow plugin's `excludes: Set<String>` vs catalog's
+                // `JacocoTaskExtension.excludes: ListProperty`).
+                return Advisor.addTodo(m, adviceMessage(m, match, getCursor()));
             }
 
             /**
-             * Resolve which {@link Kind} {@code select} represents, if any. Tries, in order:
+             * Resolve which {@link Kind} {@code select} represents, and how confidently.
+             * Tiered:
              * <ol>
-             *   <li>{@code J.FieldAccess} (explicit {@code task.env}) — uses target's type + field name</li>
-             *   <li>{@code J.MethodInvocation} that's a bean-style getter ({@code task.getEnv()}) —
-             *       uses select's type + bean property name</li>
-             *   <li>{@code J.Identifier} (bare {@code env}) — falls back to the enclosing DSL scope
-             *       via {@link KotlinDslScope}, then catalog lookup by simple name</li>
+             *   <li><b>Confident</b> — receiver's declaring type resolves from the LST
+             *       ({@code J.FieldAccess} with typed target, bean-style getter with typed
+             *       select) and the catalog matches, OR bare identifier inside a typed DSL
+             *       scope ({@code withType<T>} etc.) where the catalog matches on the scope's
+             *       simple name.</li>
+             *   <li><b>Candidate</b> — bare identifier where no enclosing scope resolves, but
+             *       the property name matches a cataloged entry somewhere. Could be a real
+             *       match (untyped {@code testTask.configure { environment.remove(...) }}) or
+             *       a name collision with an unrelated third-party field (Shadow plugin's
+             *       {@code excludes: Set<String>}). Caller should emit a TODO advisor rather
+             *       than a mechanical rewrite.</li>
              * </ol>
-             * Restricted to Kinds that have {@code methodName} in their unsupported set, so we
-             * don't cross-contaminate between (say) List and Map calls that share an identifier
-             * name like {@code remove}.
+             * Returns {@code null} when no Kind can be attributed or the method isn't
+             * unsupported for that Kind.
              */
-            private Kind resolveReceiverKind(Expression select, String methodName) {
+            private Match resolveReceiverKind(Expression select, String methodName) {
                 String propName = null;
                 JavaType.FullyQualified receiverFq = null;
                 if (select instanceof J.FieldAccess) {
@@ -174,43 +185,52 @@ public class MigratePropertyMutations extends Recipe {
                 if (propName == null) {
                     return null;
                 }
+                // Tier 1: explicit receiver type + catalog match → confident.
                 Kind kind = null;
                 if (receiverFq != null) {
                     kind = MigratedProperties.lookup(receiverFq, propName);
+                    if (kindMatchesUnsupportedMethod(kind, methodName)) {
+                        return new Match(kind, true);
+                    }
                 }
-                if (kind == null && select instanceof J.Identifier) {
-                    // Bare implicit-this inside a typed DSL lambda — consult the enclosing scope.
-                    // Same gating as the setter recipes: only for bare identifiers, never for
-                    // explicit receiver chains whose type is merely unresolved.
+                // Tier 2: bare identifier + enclosing typed DSL scope → confident.
+                if (select instanceof J.Identifier) {
                     String scope = KotlinDslScope.findEnclosingTypedScope(getCursor());
                     if (scope != null) {
                         kind = MigratedProperties.lookupBySimpleName(scope, propName);
+                        if (kindMatchesUnsupportedMethod(kind, methodName)) {
+                            return new Match(kind, true);
+                        }
                     }
-                    // Deliberately NO catalog-wide name-only fallback here. It's tempting — it
-                    // would catch `environment.remove(...)` inside an untyped `testTask.configure
-                    // { }` — but it ALSO matches any unrelated collection whose field name
-                    // collides with a cataloged property. junit-framework's shadow-conventions
-                    // has `shadowJar { ... excludes.remove("module-info.class") }` where
-                    // `excludes` is a plain `Set<String>` on com.github.johnrengelman.shadow's
-                    // ShadowJar; our catalog has the name as `JacocoTaskExtension.excludes` /
-                    // LIST_PROPERTY. Name-only match wrongly emits the `DefaultListProperty`
-                    // cast, which explodes at runtime: "LinkedHashSet cannot be cast to
-                    // DefaultListProperty". Precision > recall here — a missed rewrite is a
-                    // manual fix; a bad rewrite breaks the build.
-                }
-                // Only return the Kind if the method is actually unsupported for it. This
-                // prevents a false positive like `listOfStringsReceiver.remove("x")` wrongly
-                // being treated as a MAP_PROPERTY site because a catalog simple-name collision
-                // would put it in both Kind.MAP_PROPERTY and Kind.LIST_PROPERTY.
-                if (kind != null) {
-                    Set<String> unsupportedForKind = UNSUPPORTED.get(kind);
-                    if (unsupportedForKind == null || !unsupportedForKind.contains(methodName)) {
-                        return null;
+                    // Tier 3: bare identifier + catalog name-only agreement → CANDIDATE.
+                    // Might be the real thing (`environment.remove(...)` inside an untyped
+                    // `testTask.configure { }`) or a name collision with a third-party field
+                    // (Shadow plugin's `excludes: Set<String>`). Never auto-rewrite — the call
+                    // site asks the user to review via TODO advisor.
+                    kind = MigratedProperties.lookupByNameOnly(propName);
+                    if (kindMatchesUnsupportedMethod(kind, methodName)) {
+                        return new Match(kind, false);
                     }
                 }
-                return kind;
+                return null;
+            }
+
+            private boolean kindMatchesUnsupportedMethod(Kind kind, String methodName) {
+                if (kind == null) return false;
+                Set<String> unsupported = UNSUPPORTED.get(kind);
+                return unsupported != null && unsupported.contains(methodName);
             }
         });
+    }
+
+    /** Receiver-kind resolution result: {@link Kind} plus a confidence flag. */
+    private static final class Match {
+        final Kind kind;
+        final boolean confident;
+        Match(Kind kind, boolean confident) {
+            this.kind = kind;
+            this.confident = confident;
+        }
     }
 
     private static boolean isUnsupportedForAnyKind(String methodName) {
@@ -241,32 +261,43 @@ public class MigratePropertyMutations extends Recipe {
                 .apply(cursor, m.getCoordinates().replace());
     }
 
-    private static String adviceMessage(J.MethodInvocation m, Kind kind, Cursor cursor) {
+    private static String adviceMessage(J.MethodInvocation m, Match match, Cursor cursor) {
         String receiver = renderReceiver(m.getSelect(), cursor);
         String call = m.getSimpleName();
         String args = renderArgs(m, cursor);
-        String toMut = TO_MUTABLE.get(kind);
-        String internal = INTERNAL_TYPE.get(kind);
-        String var = LAMBDA_VAR.get(kind);
+        String toMut = TO_MUTABLE.get(match.kind);
+        String internal = INTERNAL_TYPE.get(match.kind);
+        String var = LAMBDA_VAR.get(match.kind);
         String noun;
-        switch (kind) {
+        switch (match.kind) {
             case MAP_PROPERTY: noun = "MapProperty"; break;
             case LIST_PROPERTY: noun = "ListProperty"; break;
             case SET_PROPERTY: noun = "SetProperty"; break;
             default: noun = "Property";
         }
-        return noun + " does not support `" + call + "(...)`.\n" +
-               "\n" +
-               "Copy-mutate-set replacement:\n" +
-               "    val updated = " + receiver + ".get()." + toMut + "()\n" +
-               "    updated." + call + "(" + args + ")\n" +
-               "    " + receiver + ".set(updated)\n" +
-               "\n" +
-               "Internal-API alternative (fragile, not recommended):\n" +
-               "    (" + receiver + " as " + internal + ").replace {\n" +
-               "        it.map { " + var + " -> " + var + "." + toMut + "().apply { " +
-               call + "(" + args + ") } }\n" +
-               "    }";
+        StringBuilder sb = new StringBuilder();
+        if (!match.confident) {
+            sb.append("Possible ").append(noun).append(" mutation — receiver type could not be")
+              .append(" verified from the LST. `").append(receiver).append("` matches a cataloged")
+              .append(" property name, but the enclosing scope isn't typed ")
+              .append("(`withType<T>` / `register<T>` etc.), so this MIGHT be an unrelated ")
+              .append("third-party field with the same name (e.g. Shadow plugin's `excludes: ")
+              .append("Set<String>`). Review before applying either replacement below.\n\n");
+        } else {
+            sb.append(noun).append(" does not support `").append(call).append("(...)`.\n\n");
+        }
+        sb.append("Copy-mutate-set replacement:\n")
+          .append("    val updated = ").append(receiver).append(".get().").append(toMut).append("()\n")
+          .append("    updated.").append(call).append("(").append(args).append(")\n")
+          .append("    ").append(receiver).append(".set(updated)\n")
+          .append("\n")
+          .append("Internal-API alternative (fragile, not recommended):\n")
+          .append("    (").append(receiver).append(" as ").append(internal).append(").replace {\n")
+          .append("        it.map { ").append(var).append(" -> ").append(var).append(".")
+          .append(toMut).append("().apply { ").append(call).append("(").append(args)
+          .append(") } }\n")
+          .append("    }");
+        return sb.toString();
     }
 
     private static String renderReceiver(Expression select, Cursor cursor) {
