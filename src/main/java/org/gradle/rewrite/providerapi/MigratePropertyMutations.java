@@ -186,20 +186,17 @@ public class MigratePropertyMutations extends Recipe {
                     if (scope != null) {
                         kind = MigratedProperties.lookupBySimpleName(scope, propName);
                     }
-                    if (kind == null) {
-                        // No typed scope (or the property isn't on that type). Last-chance:
-                        // consult the catalog by name alone — safer here than for setters because
-                        // {@link MigratedProperties#lookupByNameOnly} only returns a Kind when
-                        // every cataloged entry with that property name agrees. `environment` is
-                        // MAP_PROPERTY on Test/Exec/JavaExec/ExecSpec/JavaExecSpec/ProcessForkOptions
-                        // — all agree, so `environment.remove(...)` inside an untyped lambda like
-                        // `testTask.configure { }` is still safely recognized. The collection-
-                        // mutation method filter (remove/clear/compute/etc.) narrows the match
-                        // further, so a non-Property class with an unrelated `remove(String)`
-                        // method won't be hit unless its property name also collides with one in
-                        // the catalog.
-                        kind = MigratedProperties.lookupByNameOnly(propName);
-                    }
+                    // Deliberately NO catalog-wide name-only fallback here. It's tempting — it
+                    // would catch `environment.remove(...)` inside an untyped `testTask.configure
+                    // { }` — but it ALSO matches any unrelated collection whose field name
+                    // collides with a cataloged property. junit-framework's shadow-conventions
+                    // has `shadowJar { ... excludes.remove("module-info.class") }` where
+                    // `excludes` is a plain `Set<String>` on com.github.johnrengelman.shadow's
+                    // ShadowJar; our catalog has the name as `JacocoTaskExtension.excludes` /
+                    // LIST_PROPERTY. Name-only match wrongly emits the `DefaultListProperty`
+                    // cast, which explodes at runtime: "LinkedHashSet cannot be cast to
+                    // DefaultListProperty". Precision > recall here — a missed rewrite is a
+                    // manual fix; a bad rewrite breaks the build.
                 }
                 // Only return the Kind if the method is actually unsupported for it. This
                 // prevents a false positive like `listOfStringsReceiver.remove("x")` wrongly

@@ -136,9 +136,10 @@ public class MigrateScalarPropertySelfReference extends Recipe {
             if (scope != null) {
                 kind = MigratedProperties.lookupBySimpleName(scope, propName);
             }
-            if (kind == null) {
-                kind = MigratedProperties.lookupByNameOnly(propName);
-            }
+            // No catalog-wide name-only fallback — same false-positive risk as
+            // MigratePropertyMutations: a property name that's cataloged on a Gradle type
+            // might collide with an unrelated field on a third-party DSL receiver, and the
+            // emitted rewrite would blow up at runtime.
         }
         return kind == Kind.SCALAR_PROPERTY ? kind : null;
     }
