@@ -9,12 +9,12 @@ import org.openrewrite.test.TypeValidation;
 import static org.openrewrite.kotlin.Assertions.kotlin;
 
 /**
- * Verifies the catalog's name-only fallback fires when the setter is called without an explicit
- * receiver — the common case in Kotlin DSL configuration blocks and {@code doLast {}} / {@code doFirst {}}.
- *
- * <p>In these contexts, type attribution often can't resolve the enclosing closure's receiver on
- * {@code .gradle.kts} scripts, so the setter call's declaring type is null. The fallback looks up
- * the property name in the catalog — if all cataloged entries agree on the kind, the rewrite proceeds.
+ * Pins the negative: implicit-this setter calls whose declaring type cannot be resolved from the LST
+ * are NOT rewritten. A previous draft used a name-only catalog fallback, but it caused false positives
+ * when a property name appeared on ONE cataloged type while the actual enclosing receiver was a DIFFERENT
+ * (uncataloged) type — e.g. {@code setIncludes(listOf(...))} inside {@code tasks.register<Test> { }}
+ * where {@code includes} is a LIST_PROPERTY on {@code JacocoTaskExtension} but still {@code Set<String>}
+ * on {@code Test}.
  */
 class MigratePropertySetterImplicitThisTest implements RewriteTest {
 
@@ -22,25 +22,16 @@ class MigratePropertySetterImplicitThisTest implements RewriteTest {
     public void defaults(RecipeSpec spec) {
         spec.recipe(new MigratePropertySetter())
                 .parser(KotlinParser.builder().dependsOn(GradleApiKotlinStubs.ALL))
-                // Implicit-this calls in .gradle.kts can't fully type-attribute on test stubs; relax
-                // method-invocation validation (mirrors what the real recipe hits on real Gradle scripts).
                 .typeValidationOptions(TypeValidation.builder().methodInvocations(false).build());
     }
 
     @Test
-    void migratesImplicitSetterInsideDoLast() {
-        // maxMemory is SCALAR_PROPERTY on both Test and Javadoc — catalog name-only lookup is unambiguous.
+    void doesNotRewriteImplicitSetterWhenReceiverTypeUnknown() {
         rewriteRun(
                 kotlin(
                         "fun cfg() {\n" +
                         "    val anyBlock: () -> Unit = {\n" +
                         "        setMaxMemory(\"1024m\")\n" +
-                        "    }\n" +
-                        "    anyBlock()\n" +
-                        "}\n",
-                        "fun cfg() {\n" +
-                        "    val anyBlock: () -> Unit = {\n" +
-                        "        getMaxMemory().set(\"1024m\")\n" +
                         "    }\n" +
                         "    anyBlock()\n" +
                         "}\n",

@@ -110,19 +110,13 @@ public class MigratePropertySetter extends Recipe {
 
             JavaType.FullyQualified declaring = resolveDeclaring(setterType, m.getSelect());
             Kind kind = MigratedProperties.lookup(declaring, propName);
-            if (kind == null && declaring == null) {
-                // Fallback ONLY when we genuinely couldn't resolve the receiver's type — this is
-                // the implicit-this case inside .gradle.kts / doLast / doFirst blocks, where the
-                // closure receiver isn't type-attributed. If the property name maps unambiguously
-                // to one kind across the whole catalog, we can safely apply the rewrite.
-                //
-                // Critical: we do NOT fall back when declaring resolved but the property isn't in
-                // the catalog for that type — that means the property isn't migrated on THIS type
-                // (e.g. Task.enabled is still boolean; only Test.enabled became Property<Boolean>).
-                // Previously the fallback fired in that case and produced incorrect rewrites like
-                // task.getEnabled().set(false) which breaks with "boolean cannot be dereferenced".
-                kind = MigratedProperties.lookupByNameOnly(propName);
-            }
+            // No name-only fallback. We previously had one for implicit-this calls inside
+            // .gradle.kts closures (e.g. setMaxMemory("1g") inside tasks.javadoc { }), but it caused
+            // false positives when a property name appeared in the catalog on ONE type and the
+            // actual receiver was a DIFFERENT type — e.g. setIncludes(listOf(...)) inside
+            // tasks.register<Test> { }. Catalog has `includes` as LIST_PROPERTY on
+            // JacocoTaskExtension but Test.includes is still Set<String>. The safe stance is:
+            // only rewrite when we can confirm the receiver's declaring type from the LST.
             if (kind != expectedKind) {
                 return m;
             }
