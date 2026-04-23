@@ -110,11 +110,17 @@ public class MigratePropertySetter extends Recipe {
 
             JavaType.FullyQualified declaring = resolveDeclaring(setterType, m.getSelect());
             Kind kind = MigratedProperties.lookup(declaring, propName);
-            if (kind == null) {
-                // Fallback: implicit-this calls inside .gradle.kts configuration blocks (and sometimes
-                // doLast / doFirst closures) don't carry a resolved declaring type. If the property
-                // name maps unambiguously to one kind across the whole catalog, we can safely apply
-                // the rewrite without knowing the exact receiver type.
+            if (kind == null && declaring == null) {
+                // Fallback ONLY when we genuinely couldn't resolve the receiver's type — this is
+                // the implicit-this case inside .gradle.kts / doLast / doFirst blocks, where the
+                // closure receiver isn't type-attributed. If the property name maps unambiguously
+                // to one kind across the whole catalog, we can safely apply the rewrite.
+                //
+                // Critical: we do NOT fall back when declaring resolved but the property isn't in
+                // the catalog for that type — that means the property isn't migrated on THIS type
+                // (e.g. Task.enabled is still boolean; only Test.enabled became Property<Boolean>).
+                // Previously the fallback fired in that case and produced incorrect rewrites like
+                // task.getEnabled().set(false) which breaks with "boolean cannot be dereferenced".
                 kind = MigratedProperties.lookupByNameOnly(propName);
             }
             if (kind != expectedKind) {

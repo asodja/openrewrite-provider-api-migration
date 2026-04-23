@@ -11,50 +11,52 @@
 
 import java.io.File
 
-gradle.projectsEvaluated {
-    // Only fire for the primary build. Included / settings-included builds get their own projectsEvaluated
-    // callback but we want one manifest at the outermost root.
-    if (gradle.parent != null) {
-        return@projectsEvaluated
-    }
-    val manifestFile = File(rootProject.rootDir, ".rewrite-manifest.json")
-    val entries = mutableListOf<String>()
-    // Collect project roots too, so we can pick up *.gradle[.kts] files that live there
-    // (outside any source set).
-    val projectRoots = mutableSetOf<String>()
+// Collect per-project inside that project's afterEvaluate so classpath resolution has the project
+// lock. Gradle 9 rejects cross-project configuration resolution from gradle.projectsEvaluated,
+// which is why an earlier draft produced empty classpaths across Spring.
+val collectedEntries = java.util.concurrent.CopyOnWriteArrayList<String>()
+val collectedRoots = java.util.concurrent.CopyOnWriteArraySet<String>()
 
-    rootProject.allprojects.forEach { project ->
-        projectRoots.add(project.projectDir.absolutePath)
-        val ssc = project.extensions.findByType(org.gradle.api.tasks.SourceSetContainer::class.java)
-            ?: return@forEach
+gradle.allprojects {
+    // Only act on the primary build. Included builds get their own init-script invocations.
+    if (gradle.parent != null) return@allprojects
+
+    afterEvaluate {
+        collectedRoots.add(projectDir.absolutePath)
+        val ssc = extensions.findByType(org.gradle.api.tasks.SourceSetContainer::class.java)
+            ?: return@afterEvaluate
         ssc.forEach { ss ->
             val srcDirs = ss.allSource.srcDirs.filter { it.exists() }.map { it.absolutePath }
             if (srcDirs.isEmpty()) return@forEach
-            // `.files` on a Configuration triggers dependency resolution but not compile cascade
-            // for jar-file entries. Project-dependency entries resolve to their output directories
-            // which WOULD trigger compile on execution — but because we abort before execution,
-            // the cascade doesn't run. We collect the declared files here for later use.
-            val classpath = try {
-                ss.compileClasspath.files.map { it.absolutePath }
-            } catch (e: Throwable) {
-                // Some classpaths can't be resolved at configuration time (especially across broken
-                // included builds). Skip gracefully — the parse can still run, just with less type
-                // attribution.
-                emptyList()
-            }
-            entries += buildString {
+            // We deliberately do NOT resolve compile classpath per source set here. Two reasons:
+            //   1. Gradle 9's project-lock rules reject some cross-project resolutions.
+            //   2. On some projects (Spring's :integration-tests) eager classpath resolution
+            //      trips "Cannot mutate the hierarchy of configuration" ordering errors.
+            // The standalone runner gets a shared Gradle-API classpath from the distribution lib/
+            // dir instead — enough for type-attribution on build-logic Java files.
+            collectedEntries += buildString {
                 append("{\"project\":")
-                append(project.path.jsonEncode())
+                append(path.jsonEncode())
                 append(",\"sourceSet\":")
                 append(ss.name.jsonEncode())
                 append(",\"srcDirs\":")
                 append(srcDirs.toJsonArray())
                 append(",\"classpath\":")
-                append(classpath.toJsonArray())
+                append(emptyList<String>().toJsonArray())
                 append("}")
             }
         }
     }
+}
+
+gradle.projectsEvaluated {
+    // Only fire for the primary build.
+    if (gradle.parent != null) {
+        return@projectsEvaluated
+    }
+    val manifestFile = File(rootProject.rootDir, ".rewrite-manifest.json")
+    val entries = collectedEntries.toList()
+    val projectRoots = collectedRoots.toSortedSet()
 
     // Also record the project-root paths of included builds (and buildSrc if present) so the
     // runner can recurse into them with its own discovery.
@@ -68,7 +70,25 @@ gradle.projectsEvaluated {
                 ",\"path\":" + inc.projectDir.absolutePath.jsonEncode() + "}"
     }
 
-    val projectRootEntries = projectRoots.sorted().map { "\"$it\"" }
+    val projectRootEntries = projectRoots.toList().map { "\"$it\"" }
+
+    // The Gradle distribution's lib/ + lib/plugins/ jars — contain the full Gradle API. We publish
+    // these as the shared classpath all source sets use. Avoids per-source-set resolution while
+    // still giving the parser enough types to attribute build-logic Java files.
+    val gradleLibJars = mutableListOf<String>()
+    try {
+        val gradleHome = gradle.gradleHomeDir
+        if (gradleHome != null) {
+            val lib = File(gradleHome, "lib")
+            if (lib.isDirectory) {
+                lib.walkTopDown().filter { it.isFile && it.name.endsWith(".jar") }
+                    .forEach { gradleLibJars.add(it.absolutePath) }
+            }
+        }
+    } catch (e: Throwable) {
+        println("[rewrite-discovery] WARN: could not list Gradle distribution jars: ${e.message}")
+    }
+
     val json = buildString {
         append("{\n  \"sourceSets\": [\n    ")
         append(entries.joinToString(",\n    "))
@@ -76,7 +96,9 @@ gradle.projectsEvaluated {
         append(projectRootEntries.joinToString(",\n    "))
         append("\n  ],\n  \"nestedBuilds\": [\n    ")
         append(auxEntries.joinToString(",\n    "))
-        append("\n  ]\n}\n")
+        append("\n  ],\n  \"gradleApi\": ")
+        append(gradleLibJars.toJsonArray())
+        append("\n}\n")
     }
     manifestFile.writeText(json)
     println("[rewrite-discovery] ${entries.size} source sets + ${auxEntries.size} nested builds -> $manifestFile")

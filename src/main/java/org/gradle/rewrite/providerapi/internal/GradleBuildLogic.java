@@ -47,19 +47,33 @@ public final class GradleBuildLogic {
                 || path.endsWith("init.gradle") || path.endsWith("init.gradle.kts")) {
             return true;
         }
-        // Walk imports. Works for Java (J.CompilationUnit), Groovy (extends J.CompilationUnit), and
-        // Kotlin (K.CompilationUnit uses the same J.Import node for import declarations).
-        AtomicBoolean found = new AtomicBoolean();
-        new JavaIsoVisitor<AtomicBoolean>() {
-            @Override
-            public J.Import visitImport(J.Import imp, AtomicBoolean acc) {
+        // Check imports directly on the compilation unit. Works for Java (J.CompilationUnit), Groovy
+        // (G.CompilationUnit extending J.CompilationUnit), and Kotlin (K.CompilationUnit exposes its
+        // imports via the same getImports() accessor).
+        if (sourceFile instanceof J.CompilationUnit) {
+            for (J.Import imp : ((J.CompilationUnit) sourceFile).getImports()) {
                 if (imp.getPackageName().startsWith("org.gradle.")) {
-                    acc.set(true);
+                    return true;
                 }
-                return imp;
             }
-        }.visit(sourceFile, found);
-        return found.get();
+        }
+        // K.CompilationUnit has a separate import list. Try reflectively to avoid a hard dep on K.
+        try {
+            java.lang.reflect.Method getImports = sourceFile.getClass().getMethod("getImports");
+            Object result = getImports.invoke(sourceFile);
+            if (result instanceof Iterable) {
+                for (Object entry : (Iterable<?>) result) {
+                    if (entry instanceof J.Import) {
+                        if (((J.Import) entry).getPackageName().startsWith("org.gradle.")) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            // Not a compilation unit type we know about — fall through.
+        }
+        return false;
     }
 
     /**

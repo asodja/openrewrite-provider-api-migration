@@ -48,7 +48,7 @@ public final class StandaloneRunner {
 
     private final List<Path> srcDirs = new ArrayList<>();
     private final List<Path> scriptFiles = new ArrayList<>();
-    private final List<Path> classpath = new ArrayList<>();
+    private final Set<Path> classpath = new java.util.LinkedHashSet<>();
     private String recipeName = "org.gradle.rewrite.providerapi.MigrateToProviderApi";
     private boolean apply = false;
     private boolean verbose = false;
@@ -154,9 +154,13 @@ public final class StandaloneRunner {
 
         List<SourceFile> sources = new ArrayList<>();
 
+        if (verbose) {
+            System.out.println("[rewrite-runner] classpath entries: " + classpath.size());
+        }
+        List<Path> cpList = new ArrayList<>(classpath);
         if (!javaFiles.isEmpty()) {
             JavaParser parser = JavaParser.fromJavaVersion()
-                    .classpath(classpath)
+                    .classpath(cpList)
                     .logCompilationWarningsAndErrors(false)
                     .build();
             parser.parse(javaFiles, null, ctx).forEach(sources::add);
@@ -164,7 +168,7 @@ public final class StandaloneRunner {
         }
         if (!kotlinFiles.isEmpty()) {
             KotlinParser kparser = KotlinParser.builder()
-                    .classpath(classpath)
+                    .classpath(cpList)
                     .logCompilationWarningsAndErrors(false)
                     .build();
             kparser.parse(kotlinFiles, null, ctx).forEach(sources::add);
@@ -177,7 +181,7 @@ public final class StandaloneRunner {
             try {
                 Class<?> gpClass = Class.forName("org.openrewrite.groovy.GroovyParser");
                 Object builder = gpClass.getMethod("builder").invoke(null);
-                builder.getClass().getMethod("classpath", java.util.Collection.class).invoke(builder, classpath);
+                builder.getClass().getMethod("classpath", java.util.Collection.class).invoke(builder, cpList);
                 builder.getClass().getMethod("logCompilationWarningsAndErrors", boolean.class).invoke(builder, false);
                 Object parser = builder.getClass().getMethod("build").invoke(builder);
                 Object stream = parser.getClass().getMethod("parse", Iterable.class, Path.class, ExecutionContext.class)
@@ -210,6 +214,10 @@ public final class StandaloneRunner {
         }
 
         System.out.println("[rewrite-runner] running recipe: " + recipe.getName());
+        if (verbose) {
+            System.out.println("[rewrite-runner] recipe list (" + recipe.getRecipeList().size() + "): ");
+            recipe.getRecipeList().forEach(r -> System.out.println("    - " + r.getName()));
+        }
         org.openrewrite.LargeSourceSet lss = new org.openrewrite.internal.InMemoryLargeSourceSet(sources);
         List<Result> results = recipe.run(lss, ctx).getChangeset().getAllResults();
 

@@ -1,3 +1,4 @@
+
 #!/bin/bash
 # Standalone migration runner — bypasses rewrite-gradle-plugin.
 #
@@ -124,6 +125,25 @@ echo "[run-migration] build-logic dirs: ${#SRC_DIRS[@]}, scripts: ${#SCRIPT_FILE
 printf '  dir:    %s\n' "${SRC_DIRS[@]}"
 printf '  script: %s\n' "${SCRIPT_FILES[@]}"
 
+# 3d — shared classpath from the Gradle distribution's lib/ jars. Supplies org.gradle.* types so
+# Spring-style Java buildSrc parses to real LSTs (otherwise the Java parser produces ParseErrors
+# that block every recipe).
+CLASSPATH_ENTRIES=$(python3 -c '
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+seen = set()
+for c in data.get("gradleApi", []):
+    if c not in seen:
+        seen.add(c)
+        print(c)
+for ss in data.get("sourceSets", []):
+    for c in ss.get("classpath", []):
+        if c not in seen:
+            seen.add(c)
+            print(c)
+' "$TARGET/.rewrite-manifest.json" | tr '\n' ':' | sed 's/:$//')
+
 # --- 4. invoke runner
 RUNNER_ARGS=()
 for d in "${SRC_DIRS[@]}"; do
@@ -132,6 +152,9 @@ done
 for f in "${SCRIPT_FILES[@]}"; do
     RUNNER_ARGS+=("--script-file" "$f")
 done
+if [ -n "$CLASSPATH_ENTRIES" ]; then
+    RUNNER_ARGS+=("--classpath" "$CLASSPATH_ENTRIES")
+fi
 
 # Default mode is dry-run; pass --apply through.
 APPLY_FLAG=""
