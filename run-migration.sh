@@ -1,4 +1,3 @@
-
 #!/bin/bash
 # Standalone migration runner — bypasses rewrite-gradle-plugin.
 #
