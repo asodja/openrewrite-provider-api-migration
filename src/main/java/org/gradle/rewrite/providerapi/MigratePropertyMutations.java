@@ -245,6 +245,12 @@ public class MigratePropertyMutations extends Recipe {
      * snippet against Kotlin's grammar and produces a real {@code J} subtree (no {@code J.Unknown}),
      * at the cost of dropping type attribution on the synthesized identifiers — a parse cycle on
      * the migrated Gradle will re-attribute them.
+     *
+     * <p>A compact {@code TODO:} block comment is prepended so each site is easy to find later and
+     * so the user gets explicit guidance on the unchecked-cast warning (Kotlin can't prove the
+     * runtime-safe erasure cast {@code Foo<String, String> as Foo<Any?, Any?>} — {@code @Suppress}
+     * at the expression level would confuse rewrite-kotlin's printer, so we recommend the
+     * file-level {@code @file:Suppress("UNCHECKED_CAST")} opt-out in the comment instead).
      */
     private static J rewriteAsReplaceBlock(J.MethodInvocation m, Kind kind, Cursor cursor) {
         String receiver = renderReceiver(m.getSelect(), cursor);
@@ -256,9 +262,34 @@ public class MigratePropertyMutations extends Recipe {
                 "(" + receiver + " as " + INTERNAL_TYPE.get(kind) + ").replace { " +
                 "it.map { " + var + " -> " + var + "." + toMut + "().apply { " +
                 call + "(" + args + ") } } }";
-        return KotlinTemplate.builder(snippet)
+        J rewritten = KotlinTemplate.builder(snippet)
                 .build()
                 .apply(cursor, m.getCoordinates().replace());
+        return Advisor.addTodo(rewritten, reviewMessage(kind, receiver, call, args));
+    }
+
+    /** Short TODO prepended above the internal-API rewrite so it's easy to grep for later. */
+    private static String reviewMessage(Kind kind, String receiver, String call, String args) {
+        String toMut = TO_MUTABLE.get(kind);
+        return "Uses Gradle internal API (" + internalShortName(kind) + "). Fragile —\n" +
+               "consider the public copy-mutate-set form instead:\n" +
+               "    val updated = " + receiver + ".get()." + toMut + "()\n" +
+               "    updated." + call + "(" + args + ")\n" +
+               "    " + receiver + ".set(updated)\n" +
+               "\n" +
+               "The cast below triggers UNCHECKED_CAST and\n" +
+               "UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING warnings;\n" +
+               "to silence them, add at the top of this script:\n" +
+               "    @file:Suppress(\"UNCHECKED_CAST\", \"UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING\")";
+    }
+
+    private static String internalShortName(Kind kind) {
+        switch (kind) {
+            case MAP_PROPERTY:  return "DefaultMapProperty";
+            case LIST_PROPERTY: return "DefaultListProperty";
+            case SET_PROPERTY:  return "DefaultSetProperty";
+            default:            return "internal provider impl";
+        }
     }
 
     private static String adviceMessage(J.MethodInvocation m, Match match, Cursor cursor) {

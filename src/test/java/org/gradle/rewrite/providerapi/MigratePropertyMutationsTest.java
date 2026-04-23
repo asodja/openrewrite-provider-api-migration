@@ -40,6 +40,20 @@ class MigratePropertyMutationsTest implements RewriteTest {
                         .build());
     }
 
+    private static final String MAP_TODO_REMOVE =
+            "    /*\n" +
+            "     * TODO: Uses Gradle internal API (DefaultMapProperty). Fragile —\n" +
+            "     * consider the public copy-mutate-set form instead:\n" +
+            "     *     val updated = environment.get().toMutableMap()\n" +
+            "     *     updated.remove(\"RUNNER_TEMP\")\n" +
+            "     *     environment.set(updated)\n" +
+            "     * \n" +
+            "     * The cast below triggers UNCHECKED_CAST and\n" +
+            "     * UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING warnings;\n" +
+            "     * to silence them, add at the top of this script:\n" +
+            "     *     @file:Suppress(\"UNCHECKED_CAST\", \"UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING\")\n" +
+            "     */\n";
+
     @Test
     void rewritesMapPropertyRemoveInsideTypedScope() {
         rewriteRun(
@@ -48,6 +62,7 @@ class MigratePropertyMutationsTest implements RewriteTest {
                         "    environment.remove(\"RUNNER_TEMP\")\n" +
                         "}\n",
                         "tasks.withType<Test> {\n" +
+                        MAP_TODO_REMOVE +
                         "    (environment as org.gradle.api.internal.provider.DefaultMapProperty<Any?, Any?>).replace { it.map { m -> m.toMutableMap().apply { remove(\"RUNNER_TEMP\") } } }\n" +
                         "}\n",
                         spec -> spec.path("build.gradle.kts")
@@ -63,6 +78,18 @@ class MigratePropertyMutationsTest implements RewriteTest {
                         "    environment.compute(\"K\") { _, v -> v }\n" +
                         "}\n",
                         "tasks.withType<Test> {\n" +
+                        "    /*\n" +
+                        "     * TODO: Uses Gradle internal API (DefaultMapProperty). Fragile —\n" +
+                        "     * consider the public copy-mutate-set form instead:\n" +
+                        "     *     val updated = environment.get().toMutableMap()\n" +
+                        "     *     updated.compute(\"K\", { _, v -> v })\n" +
+                        "     *     environment.set(updated)\n" +
+                        "     * \n" +
+                        "     * The cast below triggers UNCHECKED_CAST and\n" +
+                        "     * UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING warnings;\n" +
+                        "     * to silence them, add at the top of this script:\n" +
+                        "     *     @file:Suppress(\"UNCHECKED_CAST\", \"UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING\")\n" +
+                        "     */\n" +
                         "    (environment as org.gradle.api.internal.provider.DefaultMapProperty<Any?, Any?>).replace { it.map { m -> m.toMutableMap().apply { compute(\"K\", { _, v -> v }) } } }\n" +
                         "}\n",
                         spec -> spec.path("build.gradle.kts")
@@ -78,6 +105,18 @@ class MigratePropertyMutationsTest implements RewriteTest {
                         "    jvmArgs.remove(\"-Xmx1g\")\n" +
                         "}\n",
                         "tasks.withType<Test> {\n" +
+                        "    /*\n" +
+                        "     * TODO: Uses Gradle internal API (DefaultListProperty). Fragile —\n" +
+                        "     * consider the public copy-mutate-set form instead:\n" +
+                        "     *     val updated = jvmArgs.get().toMutableList()\n" +
+                        "     *     updated.remove(\"-Xmx1g\")\n" +
+                        "     *     jvmArgs.set(updated)\n" +
+                        "     * \n" +
+                        "     * The cast below triggers UNCHECKED_CAST and\n" +
+                        "     * UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING warnings;\n" +
+                        "     * to silence them, add at the top of this script:\n" +
+                        "     *     @file:Suppress(\"UNCHECKED_CAST\", \"UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING\")\n" +
+                        "     */\n" +
                         "    (jvmArgs as org.gradle.api.internal.provider.DefaultListProperty<Any?>).replace { it.map { l -> l.toMutableList().apply { remove(\"-Xmx1g\") } } }\n" +
                         "}\n",
                         spec -> spec.path("build.gradle.kts")
