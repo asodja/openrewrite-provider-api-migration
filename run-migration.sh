@@ -3,8 +3,11 @@
 #
 # Flow:
 #   1. Runs discovery-init.gradle.kts to extract per-source-set dirs from the target Gradle project
-#      (configuration-only, no compile cascade).
-#   2. Filters to build-logic entries (sources that reference org.gradle.* or are .gradle[.kts] scripts).
+#      (configuration-only, no compile cascade). The init-script classifies each project as
+#      `buildLogic` or `production` based on whether it applies `java-gradle-plugin` — this is the
+#      authoritative model signal, and critically it does NOT misclassify projects that merely
+#      import `org.gradle.*` (e.g., gradle/gradle's own source, Tooling API consumers).
+#   2. Filters to `kind=buildLogic` source sets plus `.gradle[.kts]` scripts plus nested builds.
 #   3. Invokes StandaloneRunner against those dirs with the MigrateToProviderApi recipe.
 #
 # Usage:
@@ -50,34 +53,25 @@ fi
 
 # --- 3. filter and run
 # Two kinds of inputs:
-#   (a) Source-set dirs under buildSrc/ or includeBuild'd projects — these contain build-logic
-#       *.java/*.kt files that import org.gradle.*. We walk them recursively.
+#   (a) Source-set dirs whose owning project is build-logic per the manifest classification
+#       (project applies `java-gradle-plugin`). We walk them recursively.
 #   (b) Project root dirs where *.gradle / *.gradle.kts scripts live directly. We add those SCRIPT
 #       FILES individually (not the whole project root, which would pull in production src/).
 SRC_DIRS=()
 SCRIPT_FILES=()
 
-# 3a — source-set dirs that look like build-logic
+# 3a — source-set dirs marked buildLogic by the manifest
 while IFS= read -r dir; do
     dir="${dir%\"*}"; dir="${dir#*\"}"
     [ -d "$dir" ] || continue
-    # Skip obviously non-build-logic paths
-    case "$dir" in
-        */src/main/java/*|*/src/test/*|*/src/integTest/*) continue ;;
-    esac
-    # Recursive check: any .gradle[.kts] under it?
-    if find "$dir" -maxdepth 8 -type f \( -name '*.gradle' -o -name '*.gradle.kts' \) -print -quit 2>/dev/null | grep -q .; then
-        SRC_DIRS+=("$dir"); continue
-    fi
-    # Or any java/kotlin file that imports org.gradle?
-    if grep -rlE '^import org\.gradle\.' "$dir" --include='*.java' --include='*.kt' --include='*.groovy' 2>/dev/null | head -1 | grep -q .; then
-        SRC_DIRS+=("$dir")
-    fi
+    SRC_DIRS+=("$dir")
 done < <(python3 -c '
 import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
 for ss in data.get("sourceSets", []):
+    if ss.get("kind") != "buildLogic":
+        continue
     for d in ss.get("srcDirs", []):
         print(f"\"{d}\"")
 ' "$TARGET/.rewrite-manifest.json")

@@ -10,21 +10,24 @@ import org.openrewrite.java.tree.J;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Autodiscovery for Gradle build-logic sources.
+ * Autodiscovery for Gradle build-logic sources — used by recipes as a fallback when the
+ * manifest-driven classification from {@code discovery-init.gradle.kts} isn't available
+ * (e.g. when a user runs these recipes via the rewrite-gradle-plugin directly).
  *
  * <p>A file is considered build-logic if any of these hold:
  * <ol>
  *   <li>Its path ends in {@code .gradle} or {@code .gradle.kts} — by definition a Gradle script.</li>
  *   <li>It has at least one import from {@code org.gradle.*} — true for {@code buildSrc/},
- *       included build-logic builds, custom convention-plugin layouts, and even Gradle plugins
+ *       included build-logic builds, custom convention-plugin layouts, and Gradle plugins
  *       published as production artifacts.</li>
  * </ol>
  *
- * <p>This beats hard-coding directory names (like {@code buildSrc/}) because users park build-logic
- * in arbitrary locations ({@code conventions/}, {@code build-logic/}, {@code infra/}, or anywhere
- * registered via {@code includeBuild}). The import check captures them all.
- *
- * <p>It correctly excludes production business logic and tests that don't touch Gradle API.
+ * <p>Heuristic caveat: this check fires on any file that imports {@code org.gradle.*}, which
+ * also matches Gradle's own source tree (gradle/gradle) and Tooling-API consumer libraries —
+ * projects whose source we do <em>not</em> want to migrate. The standalone-runner path sidesteps
+ * this by using the Gradle model (project applies {@code java-gradle-plugin}) to classify
+ * build-logic at manifest time. Prefer the runner when operating on codebases that mix Gradle
+ * production source with build-logic (gradle/gradle, plugin SDKs, etc.).
  */
 public final class GradleBuildLogic {
 

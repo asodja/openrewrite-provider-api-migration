@@ -25,6 +25,15 @@ gradle.allprojects {
         collectedRoots.add(projectDir.absolutePath)
         val ssc = extensions.findByType(org.gradle.api.tasks.SourceSetContainer::class.java)
             ?: return@afterEvaluate
+        // A project is build-logic iff it applies `java-gradle-plugin`. This is the authoritative
+        // signal from the Gradle model and covers every build-logic convention in general use:
+        //   - buildSrc (Gradle auto-applies groovy-gradle-plugin / java-gradle-plugin)
+        //   - pluginManagement { includeBuild(...) } targets (convention-plugin authoring)
+        //   - kotlin-dsl projects (kotlin-dsl applies java-gradle-plugin)
+        //   - plain plugin projects (plugins { `java-gradle-plugin` })
+        // It correctly excludes production Java/Kotlin code that imports `org.gradle.*` but isn't
+        // a plugin — e.g. Gradle's own source in gradle/gradle, or Tooling API consumers.
+        val kind = if (pluginManager.hasPlugin("java-gradle-plugin")) "buildLogic" else "production"
         ssc.forEach { ss ->
             val srcDirs = ss.allSource.srcDirs.filter { it.exists() }.map { it.absolutePath }
             if (srcDirs.isEmpty()) return@forEach
@@ -39,6 +48,8 @@ gradle.allprojects {
                 append(path.jsonEncode())
                 append(",\"sourceSet\":")
                 append(ss.name.jsonEncode())
+                append(",\"kind\":")
+                append(kind.jsonEncode())
                 append(",\"srcDirs\":")
                 append(srcDirs.toJsonArray())
                 append(",\"classpath\":")
