@@ -38,7 +38,7 @@ class MigrateScalarPropertySelfReferenceTest implements RewriteTest {
                         "    maxMemory = maxMemory.uppercase()\n" +
                         "}\n",
                         "tasks.withType<Test> {\n" +
-                        "    (maxMemory as org.gradle.api.internal.provider.DefaultProperty<*>).replace { it.map { v -> v.uppercase() } }\n" +
+                        "    maxMemory.set(maxMemory.get().uppercase())\n" +
                         "}\n",
                         spec -> spec.path("build.gradle.kts")
                 )
@@ -53,7 +53,7 @@ class MigrateScalarPropertySelfReferenceTest implements RewriteTest {
                         "    maxMemory = maxMemory.replace(\"-\", \"_\")\n" +
                         "}\n",
                         "tasks.withType<Test> {\n" +
-                        "    (maxMemory as org.gradle.api.internal.provider.DefaultProperty<*>).replace { it.map { v -> v.replace(\"-\", \"_\") } }\n" +
+                        "    maxMemory.set(maxMemory.get().replace(\"-\", \"_\"))\n" +
                         "}\n",
                         spec -> spec.path("build.gradle.kts")
                 )

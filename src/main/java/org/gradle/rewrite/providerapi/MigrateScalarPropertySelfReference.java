@@ -1,6 +1,5 @@
 package org.gradle.rewrite.providerapi;
 
-import org.gradle.rewrite.providerapi.internal.Advisor;
 import org.gradle.rewrite.providerapi.internal.GradleBuildLogic;
 import org.gradle.rewrite.providerapi.internal.KotlinDslScope;
 import org.gradle.rewrite.providerapi.internal.MigratedProperties;
@@ -8,7 +7,6 @@ import org.gradle.rewrite.providerapi.internal.MigratedProperties.Kind;
 import org.openrewrite.Cursor;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
-import org.openrewrite.SourceFile;
 import org.openrewrite.TreeVisitor;
 import org.openrewrite.java.JavaVisitor;
 import org.openrewrite.java.tree.Expression;
@@ -20,24 +18,26 @@ import java.util.List;
 
 /**
  * Rewrite scalar-property self-reference assignments like {@code artifactId = artifactId.uppercase()}
- * to the Gradle-internal {@code DefaultProperty.replace(Transformer)} form.
+ * to the lazy-API {@code prop.set(prop.get().m(...))} form.
  *
  * <p>Before migration, {@code artifactId} was a mutable {@code String} — this pattern read the
  * current value, transformed, and wrote back. After migration, {@code artifactId} is a
- * {@code Property<String>} and {@code .uppercase()} no longer exists on the receiver. The copy-
- * transform-set shape becomes:
+ * {@code Property<String>} and {@code .uppercase()} no longer exists on the receiver. Rewrite to:
  * <pre>
- *   (artifactId as org.gradle.api.internal.provider.DefaultProperty&lt;*&gt;)
- *       .replace { it.map { v -> v.uppercase() } }
+ *   artifactId.set(artifactId.get().uppercase())
  * </pre>
+ * This uses only the public {@code Property} API and compiles for any {@code T} — the internal
+ * {@code DefaultProperty.replace { it.map { v -> v.m(...) } }} variant looks tidier but only
+ * compiles when the lambda's {@code v} has a concrete enough type for {@code v.m(...)} to
+ * resolve. Scalar properties can have any {@code T}, and the recipe doesn't always know {@code T}
+ * at rewrite time (rewrite-kotlin often can't attribute implicit-this receivers in
+ * {@code .gradle.kts}) — the {@code get()} form dodges that problem entirely.
  *
  * <p>Detection is conservative: the LHS and RHS receiver must be textually identical, and the
- * property must be cataloged as {@link Kind#SCALAR_PROPERTY}. Kotlin-only mechanical rewrite
- * (the {@code as} cast is Kotlin-specific syntax); Java sources get a {@code TODO:} advisor.
+ * property must be cataloged as {@link Kind#SCALAR_PROPERTY}. Java sources get the same
+ * mechanical rewrite since {@code prop.set(prop.get().m(...))} is valid Java too.
  */
 public class MigrateScalarPropertySelfReference extends Recipe {
-
-    private static final String INTERNAL_TYPE = "org.gradle.api.internal.provider.DefaultProperty<*>";
 
     @Override
     public String getDisplayName() {
@@ -84,11 +84,7 @@ public class MigrateScalarPropertySelfReference extends Recipe {
                 if (kind != Kind.SCALAR_PROPERTY) {
                     return a;
                 }
-                SourceFile sourceFile = cursor.firstEnclosing(SourceFile.class);
-                if (GradleBuildLogic.isKotlin(sourceFile)) {
-                    return rewriteAsReplaceBlock(a, rhs, cursor);
-                }
-                return Advisor.addTodo(a, adviceMessage(a, rhs, cursor));
+                return rewriteAsSetGet(a, rhs, cursor);
             }
         });
     }
@@ -154,36 +150,20 @@ public class MigrateScalarPropertySelfReference extends Recipe {
     }
 
     /**
-     * Splice in {@code (recv as DefaultProperty<*>).replace { it.map { v -> v.<method>(<args>) } }}
-     * via {@link KotlinTemplate}. Uses the RHS's method name and arg list verbatim so complex
-     * chains like {@code prop.uppercase().substringBefore('-')} transfer cleanly.
+     * Splice in {@code <recv>.set(<recv>.get().<method>(<args>))} via {@link KotlinTemplate}.
+     * The {@code .get()} form compiles for any scalar T without needing to know its concrete
+     * type at rewrite time — in contrast to the internal {@code DefaultProperty.replace { }}
+     * variant where the lambda's value type has to be concrete enough for the method call to
+     * resolve.
      */
-    private static J rewriteAsReplaceBlock(J.Assignment a, J.MethodInvocation rhs, Cursor cursor) {
+    private static J rewriteAsSetGet(J.Assignment a, J.MethodInvocation rhs, Cursor cursor) {
         String receiver = a.getVariable().printTrimmed(cursor);
         String call = rhs.getSimpleName();
         String args = renderArgs(rhs, cursor);
-        String snippet =
-                "(" + receiver + " as " + INTERNAL_TYPE + ").replace { " +
-                "it.map { v -> v." + call + "(" + args + ") } }";
+        String snippet = receiver + ".set(" + receiver + ".get()." + call + "(" + args + "))";
         return KotlinTemplate.builder(snippet)
                 .build()
                 .apply(cursor, a.getCoordinates().replace());
-    }
-
-    private static String adviceMessage(J.Assignment a, J.MethodInvocation rhs, Cursor cursor) {
-        String receiver = a.getVariable().printTrimmed(cursor);
-        String call = rhs.getSimpleName();
-        String args = renderArgs(rhs, cursor);
-        return "Scalar property self-reference: `" + receiver + " = " + receiver + "." + call +
-               "(...)`.\n" +
-               "\n" +
-               "Lazy replacement:\n" +
-               "    " + receiver + ".set(" + receiver + ".get()." + call + "(" + args + "))\n" +
-               "\n" +
-               "Internal-API alternative (fragile, not recommended):\n" +
-               "    (" + receiver + " as " + INTERNAL_TYPE + ").replace {\n" +
-               "        it.map { v -> v." + call + "(" + args + ") }\n" +
-               "    }";
     }
 
     private static String renderArgs(J.MethodInvocation m, Cursor cursor) {

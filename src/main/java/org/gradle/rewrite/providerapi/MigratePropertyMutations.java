@@ -56,15 +56,23 @@ public class MigratePropertyMutations extends Recipe {
                 "remove", "clear", "removeAll", "removeIf", "retainAll")));
     }
 
-    /** FQN of the internal impl type used in the Kotlin cast. */
+    /**
+     * FQN of the internal impl type used in the Kotlin cast. Uses concrete {@code Any?} type
+     * arguments rather than wildcards (star-projections). With wildcards, the result of
+     * {@code m.toMutableMap().apply { remove(...) }} is {@code MutableMap<Any, Any>} and doesn't
+     * match the transformer's expected {@code Map<out CapturedType, out CapturedType>} — Kotlin
+     * rejects it with "Return type mismatch". {@code <Any?, Any?>} makes the whole chain concrete
+     * (at the cost of one unchecked-cast warning from the outer {@code as}, which is fine —
+     * generic type arguments are erased at runtime).
+     */
     private static final Map<Kind, String> INTERNAL_TYPE = new EnumMap<>(Kind.class);
     static {
         INTERNAL_TYPE.put(Kind.MAP_PROPERTY,
-                "org.gradle.api.internal.provider.DefaultMapProperty<*, *>");
+                "org.gradle.api.internal.provider.DefaultMapProperty<Any?, Any?>");
         INTERNAL_TYPE.put(Kind.LIST_PROPERTY,
-                "org.gradle.api.internal.provider.DefaultListProperty<*>");
+                "org.gradle.api.internal.provider.DefaultListProperty<Any?>");
         INTERNAL_TYPE.put(Kind.SET_PROPERTY,
-                "org.gradle.api.internal.provider.DefaultSetProperty<*>");
+                "org.gradle.api.internal.provider.DefaultSetProperty<Any?>");
     }
 
     /** Kotlin stdlib copy-and-cast name per Kind. */

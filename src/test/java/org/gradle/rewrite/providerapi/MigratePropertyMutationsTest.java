@@ -48,7 +48,7 @@ class MigratePropertyMutationsTest implements RewriteTest {
                         "    environment.remove(\"RUNNER_TEMP\")\n" +
                         "}\n",
                         "tasks.withType<Test> {\n" +
-                        "    (environment as org.gradle.api.internal.provider.DefaultMapProperty<*, *>).replace { it.map { m -> m.toMutableMap().apply { remove(\"RUNNER_TEMP\") } } }\n" +
+                        "    (environment as org.gradle.api.internal.provider.DefaultMapProperty<Any?, Any?>).replace { it.map { m -> m.toMutableMap().apply { remove(\"RUNNER_TEMP\") } } }\n" +
                         "}\n",
                         spec -> spec.path("build.gradle.kts")
                 )
@@ -63,7 +63,7 @@ class MigratePropertyMutationsTest implements RewriteTest {
                         "    environment.compute(\"K\") { _, v -> v }\n" +
                         "}\n",
                         "tasks.withType<Test> {\n" +
-                        "    (environment as org.gradle.api.internal.provider.DefaultMapProperty<*, *>).replace { it.map { m -> m.toMutableMap().apply { compute(\"K\", { _, v -> v }) } } }\n" +
+                        "    (environment as org.gradle.api.internal.provider.DefaultMapProperty<Any?, Any?>).replace { it.map { m -> m.toMutableMap().apply { compute(\"K\", { _, v -> v }) } } }\n" +
                         "}\n",
                         spec -> spec.path("build.gradle.kts")
                 )
@@ -78,7 +78,7 @@ class MigratePropertyMutationsTest implements RewriteTest {
                         "    jvmArgs.remove(\"-Xmx1g\")\n" +
                         "}\n",
                         "tasks.withType<Test> {\n" +
-                        "    (jvmArgs as org.gradle.api.internal.provider.DefaultListProperty<*>).replace { it.map { l -> l.toMutableList().apply { remove(\"-Xmx1g\") } } }\n" +
+                        "    (jvmArgs as org.gradle.api.internal.provider.DefaultListProperty<Any?>).replace { it.map { l -> l.toMutableList().apply { remove(\"-Xmx1g\") } } }\n" +
                         "}\n",
                         spec -> spec.path("build.gradle.kts")
                 )
