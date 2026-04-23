@@ -80,7 +80,8 @@ public final class MigratedProperties {
                 "jvmArgs"
         ));
         put(t, "org.gradle.api.tasks.testing.Test", mapLike(
-                "systemProperties"
+                "systemProperties",
+                "environment"   // inherited from ProcessForkOptions
         ));
         put(t, "org.gradle.api.tasks.testing.Test", configurableFileCollection(
                 "classpath",

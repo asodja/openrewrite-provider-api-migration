@@ -50,6 +50,7 @@ recipeList:
   - org.gradle.rewrite.providerapi.MigrateAsListToGet
   - org.gradle.rewrite.providerapi.MigrateMapPropertyClear
   - org.gradle.rewrite.providerapi.MigrateMapPropertyIndexedAssign
+  - org.gradle.rewrite.providerapi.MigratePropertyMutations
   - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
   - org.gradle.rewrite.providerapi.InsertAsFileGet
 
@@ -57,7 +58,6 @@ recipeList:
   # that show up as TODOs in the diff).
   - org.gradle.rewrite.providerapi.DetectSelfReferencingFileCollection
   - org.gradle.rewrite.providerapi.DetectSetterOverride
-  - org.gradle.rewrite.providerapi.FlagMapPropertyMutations
 ---
 type: specs.openrewrite.org/v1beta/recipe
 name: org.gradle.rewrite.providerapi.MigrateToProviderApi.NoKotlinAssignPlugin
@@ -84,8 +84,8 @@ recipeList:
   - org.gradle.rewrite.providerapi.MigrateAsListToGet
   - org.gradle.rewrite.providerapi.MigrateMapPropertyClear
   - org.gradle.rewrite.providerapi.MigrateMapPropertyIndexedAssign
+  - org.gradle.rewrite.providerapi.MigratePropertyMutations
   - org.gradle.rewrite.providerapi.InsertGetOnLazyAccess
   - org.gradle.rewrite.providerapi.InsertAsFileGet
   - org.gradle.rewrite.providerapi.DetectSelfReferencingFileCollection
   - org.gradle.rewrite.providerapi.DetectSetterOverride
-  - org.gradle.rewrite.providerapi.FlagMapPropertyMutations

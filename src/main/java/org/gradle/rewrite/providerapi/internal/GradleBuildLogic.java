@@ -33,6 +33,13 @@ public final class GradleBuildLogic {
 
     private GradleBuildLogic() {}
 
+    /** Whether the source file is Kotlin ({@code .kt}, {@code .kts}, or {@code .gradle.kts}). */
+    public static boolean isKotlin(SourceFile sourceFile) {
+        if (sourceFile == null) return false;
+        String path = sourceFile.getSourcePath().toString().replace('\\', '/');
+        return path.endsWith(".kt") || path.endsWith(".kts");
+    }
+
     /**
      * Return {@code true} if the given source file is a Gradle build-logic artifact that our
      * migration recipes should process. Returns {@code false} for production code, test code, or
