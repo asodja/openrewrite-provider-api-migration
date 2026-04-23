@@ -32,6 +32,8 @@ All 18 recipes are composed into one meta-recipe: `org.gradle.rewrite.providerap
 
 Running on a real codebase and something looks off? Check **[KNOWN-ISSUES.md](./KNOWN-ISSUES.md)** — it tracks the false positives, coverage gaps, and upstream bugs we've hit on junit-framework, spring-framework, and gradle/gradle, with workarounds.
 
+Adding a recipe or debugging the runner? See **[IMPLEMENTATION-README.md](./IMPLEMENTATION-README.md)** — maintainers' reference covering the project layout, the two execution paths (rewrite-gradle-plugin vs. standalone runner), every recipe's behavior, and the shared helpers (catalog, DSL scope walker, advisor).
+
 ## Prerequisites
 
 - JDK 17+ (Gradle toolchains auto-downloads if you use the foojay plugin)
