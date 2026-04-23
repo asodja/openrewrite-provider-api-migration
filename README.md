@@ -30,6 +30,8 @@ against your current Gradle version, no classpath gymnastics required.
 
 All 18 recipes are composed into one meta-recipe: `org.gradle.rewrite.providerapi.MigrateToProviderApi`.
 
+Running on a real codebase and something looks off? Check **[KNOWN-ISSUES.md](./KNOWN-ISSUES.md)** — it tracks the false positives, coverage gaps, and upstream bugs we've hit on junit-framework, spring-framework, and gradle/gradle, with workarounds.
+
 ## Prerequisites
 
 - JDK 17+ (Gradle toolchains auto-downloads if you use the foojay plugin)
