@@ -60,32 +60,60 @@ Three stages:
 
    The manifest records, per source set:
      - `project`, `sourceSet`, `srcDirs`
-     - `kind`, a three-way classification:
-         - `"buildLogic"` — the project applies `java-gradle-plugin` AND
-           does NOT apply any publishing plugin. This covers buildSrc,
-           `pluginManagement { includeBuild(...) }` targets, convention
-           plugins, kotlin-dsl projects. Safe to auto-migrate: the whole
-           build moves forward together.
-         - `"publishedGradlePlugin"` — applies `java-gradle-plugin` AND
-           one of `maven-publish`, `ivy-publish`, `com.gradle.plugin-publish`.
-           A plugin INTENDED to be consumed OUTSIDE this build (e.g.
-           `libraries/tools/kotlin-gradle-plugin` in the Kotlin repo, or a
-           Shadow plugin subproject). Excluded by default because these
-           plugins support many Gradle versions back and changing their
-           public API breaks downstream users. Opt in via the runner's
-           `--include-published-plugins` flag.
-         - `"production"` — not a Gradle plugin. Regular library /
-           application code. Never migrated.
+     - `kind`, a three-way classification driven by a single structural signal
+       plus one opt-in fallback:
+         - `"buildLogic"` — the project is declared directly on some script's
+           **buildscript classpath** inside this build, i.e. some script has
+           `buildscript { dependencies { classpath project(":this") } }`.
+           That's Gradle's own "this is code loaded at configuration time to
+           resolve plugins / buildscript blocks" signal — authoritative, not
+           heuristic. Covers convention plugins wired in via the classic
+           buildscript block.
+         - `"publishedGradlePlugin"` — applies `java-gradle-plugin` but is NOT
+           on any buildscript classpath in this build. Treated as a plugin the
+           user ships to external consumers (maven-publish /
+           com.gradle.plugin-publish / kotlin-dsl-of-a-plugin-module).
+           Examples: `:kotlin-gradle-plugin`, `:kotlin-allopen`, the whole
+           `libraries/tools/` family in the Kotlin monorepo. EXCLUDED by
+           default because these plugins support many Gradle versions back
+           and changing their public Kotlin/Java API breaks downstream users.
+           Opt in via the runner's `--only-published-plugins` flag, which
+           inverts the filter (migrate only these; buildLogic is skipped —
+           the flag is mutually exclusive with the default).
+         - `"production"` — neither of the above. Regular library / application
+           code. Never migrated.
        Correctly excludes code that merely imports `org.gradle.*` like
        gradle/gradle's own source tree or Tooling API consumers.
+
+       The classifier does NOT take the transitive closure over compile
+       configurations of buildscript-classpath projects. A production library
+       that a build-logic project happens to depend on via `implementation`
+       (e.g. `:kotlin-stdlib` as a compile dep of an internal codegen
+       `:generators`) is still production code; sweeping it in would run
+       recipes against unsuspecting library sources. The known cost: if
+       build-logic is split across multiple subprojects inside ONE build via
+       `buildscript { classpath project(":a") }` + `:a` depends on `:b` via
+       `implementation`, only `:a` is classified. Users should either add
+       each helper to the buildscript classpath explicitly, or move the
+       whole build-logic into `pluginManagement { includeBuild("...") }`
+       where every project inside is caught by nested-build handling below.
      - `projectRoots`, `nestedBuilds` (separate entries for `buildSrc` and
-       explicit `includeBuild` targets)
+       explicit `includeBuild` targets). Nested builds are walked whole-dir
+       by the runner — a convention that assumes `buildSrc`, `build-logic/`,
+       `gradle-build-conventions`, etc. contain exclusively build-logic (as
+       is standard Gradle practice).
      - `gradleApi` — list of jars in the Gradle distribution's `lib/` dir,
        used as the shared type-attribution classpath
 
-2. **Filter** — `run-migration.sh` reads the manifest and assembles:
-     - `--src-dir` args for source sets with `kind == "buildLogic"`
-     - `--src-dir` args for each nested build (walked as a whole)
+2. **Filter** — `run-migration.sh` reads the manifest and assembles inputs
+   for exactly one kind at a time (mutually exclusive):
+     - default                       → `--src-dir` args for source sets with
+                                       `kind == "buildLogic"`
+     - `--only-published-plugins` → `--src-dir` args for source sets with
+                                       `kind == "publishedGradlePlugin"`
+   plus:
+     - `--src-dir` args for each nested build (walked as a whole, regardless
+       of the chosen kind)
      - `--script-file` args for `*.gradle` / `*.gradle.kts` at project roots
      - `--classpath` = flattened Gradle distribution jars
 

@@ -5,20 +5,26 @@
 #   1. Runs discovery-init.gradle.kts to extract per-source-set dirs from the target Gradle project
 #      (configuration-only, no compile cascade). The init-script classifies each project as
 #      `buildLogic`, `publishedGradlePlugin`, or `production`:
-#        - `buildLogic`           — applies java-gradle-plugin AND does NOT publish. The
-#                                   plugin stays inside this build (buildSrc, convention plugins,
-#                                   pluginManagement-included builds). Safe to auto-migrate.
-#        - `publishedGradlePlugin` — applies java-gradle-plugin AND publishes (maven-publish /
-#                                   ivy-publish / com.gradle.plugin-publish). Consumed outside
-#                                   this build by users on various Gradle versions. SKIPPED by
-#                                   default to avoid breaking downstream users; opt in via
-#                                   --include-published-plugins.
-#        - `production`           — not a Gradle plugin. Never migrated.
-#   2. Filters to the selected kinds, plus `.gradle[.kts]` scripts and nested builds.
+#        - `buildLogic`            — project's compiled output lands on some script's buildscript
+#                                    classpath inside this build (directly via
+#                                    `buildscript.dependencies.classpath project(...)` or
+#                                    transitively via `implementation`/`api` etc.). This IS the
+#                                    build's own plugin code — safe to auto-migrate.
+#        - `publishedGradlePlugin` — applies `java-gradle-plugin` but is NOT consumed by any
+#                                    buildscript classpath in this build. Treated as a plugin the
+#                                    user ships to external consumers (maven-publish,
+#                                    com.gradle.plugin-publish). Those plugins often support
+#                                    many Gradle versions back, so auto-migrating them risks
+#                                    breaking downstream users on older Gradles.
+#        - `production`            — not a Gradle plugin. Never migrated.
+#   2. Filters to EXACTLY ONE kind (mutually exclusive):
+#        - default                      → migrate only `buildLogic`.
+#        - --only-published-plugins  → migrate only `publishedGradlePlugin` (buildLogic skipped).
+#      Plus `.gradle[.kts]` scripts and nested-build root directories.
 #   3. Invokes StandaloneRunner against those dirs with the MigrateToProviderApi recipe.
 #
 # Usage:
-#   ./run-migration.sh <target-project-dir> [--apply] [--verbose] [--include-published-plugins]
+#   ./run-migration.sh <target-project-dir> [--apply] [--verbose] [--only-published-plugins]
 #
 # By default this is a dry run — pass --apply to write changes to disk.
 
@@ -27,23 +33,26 @@ set -e
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${1:-}"
 if [ -z "$TARGET" ] || [ "$TARGET" = "-h" ] || [ "$TARGET" = "--help" ]; then
-    echo "usage: $0 <target-project-dir> [--apply] [--verbose] [--include-published-plugins]"
+    echo "usage: $0 <target-project-dir> [--apply] [--verbose] [--only-published-plugins]"
     echo ""
     echo "  target-project-dir            absolute or relative path to a Gradle project"
     echo "  --apply                       write changes (default: dry run)"
     echo "  --verbose                     print unified diffs in dry-run mode"
-    echo "  --include-published-plugins   also migrate Gradle plugins published to Maven Central /"
-    echo "                                Plugin Portal. OFF by default — these plugins often support"
-    echo "                                many Gradle versions back, so auto-migration can break users."
+    echo "  --only-published-plugins      migrate ONLY Gradle plugins published to Maven Central /"
+    echo "                                Plugin Portal (consumed outside this build). Mutually"
+    echo "                                exclusive with the default: pick buildLogic OR published"
+    echo "                                plugins, never both in a single run. OFF by default —"
+    echo "                                these plugins often support many Gradle versions back,"
+    echo "                                so auto-migration can break downstream users."
     exit 2
 fi
 TARGET="$(cd "$TARGET" && pwd)"
 shift || true
 EXTRA_ARGS=("$@")
-INCLUDE_PUBLISHED="no"
+ONLY_PUBLISHED="no"
 for a in "${EXTRA_ARGS[@]}"; do
     case "$a" in
-        --include-published-plugins) INCLUDE_PUBLISHED="yes" ;;
+        --only-published-plugins) ONLY_PUBLISHED="yes" ;;
     esac
 done
 
@@ -82,25 +91,36 @@ fi
 
 # --- 3. filter and run
 # Two kinds of inputs:
-#   (a) Source-set dirs whose owning project is build-logic per the manifest classification
-#       (project applies `java-gradle-plugin`). We walk them recursively.
+#   (a) Source-set dirs whose owning project matches the selected kind (buildLogic by default;
+#       publishedGradlePlugin when --only-published-plugins is on). We walk them recursively.
 #   (b) Project root dirs where *.gradle / *.gradle.kts scripts live directly. We add those SCRIPT
 #       FILES individually (not the whole project root, which would pull in production src/).
 SRC_DIRS=()
 SCRIPT_FILES=()
 
-# 3a — source-set dirs marked buildLogic by the manifest (and optionally publishedGradlePlugin).
-# Count and report skipped published-plugin source sets for visibility.
-SKIPPED_PUBLISHED_PROJECTS=$(python3 -c '
+# 3a — source-set dirs for the selected kind. Default picks buildLogic; --only-published-plugins
+# SWAPS to publishedGradlePlugin (mutually exclusive — never both in one run). Report the kind that's
+# being skipped so the user can see what was deliberately excluded.
+if [ "$ONLY_PUBLISHED" = "yes" ]; then
+    TARGET_KIND="publishedGradlePlugin"
+    SKIPPED_KIND="buildLogic"
+    SKIPPED_HINT="(omit --only-published-plugins to migrate these instead)"
+else
+    TARGET_KIND="buildLogic"
+    SKIPPED_KIND="publishedGradlePlugin"
+    SKIPPED_HINT="(use --only-published-plugins to migrate these instead)"
+fi
+SKIPPED_PROJECTS=$(python3 -c '
 import json, sys
+kind = sys.argv[2]
 with open(sys.argv[1]) as f:
     data = json.load(f)
-projects = sorted({ss["project"] for ss in data.get("sourceSets", []) if ss.get("kind") == "publishedGradlePlugin"})
+projects = sorted({ss["project"] for ss in data.get("sourceSets", []) if ss.get("kind") == kind})
 for p in projects: print(p)
-' "$TARGET/.rewrite-manifest.json")
-if [ -n "$SKIPPED_PUBLISHED_PROJECTS" ] && [ "$INCLUDE_PUBLISHED" != "yes" ]; then
-    echo "[run-migration] skipping published Gradle plugin projects (use --include-published-plugins to migrate):"
-    echo "$SKIPPED_PUBLISHED_PROJECTS" | sed 's/^/    /'
+' "$TARGET/.rewrite-manifest.json" "$SKIPPED_KIND")
+if [ -n "$SKIPPED_PROJECTS" ]; then
+    echo "[run-migration] skipping $SKIPPED_KIND projects $SKIPPED_HINT:"
+    echo "$SKIPPED_PROJECTS" | sed 's/^/    /'
 fi
 
 while IFS= read -r dir; do
@@ -109,17 +129,15 @@ while IFS= read -r dir; do
     SRC_DIRS+=("$dir")
 done < <(python3 -c '
 import json, sys
-include_published = sys.argv[2] == "yes"
+kind = sys.argv[2]
 with open(sys.argv[1]) as f:
     data = json.load(f)
-allowed = {"buildLogic"}
-if include_published: allowed.add("publishedGradlePlugin")
 for ss in data.get("sourceSets", []):
-    if ss.get("kind") not in allowed:
+    if ss.get("kind") != kind:
         continue
     for d in ss.get("srcDirs", []):
         print(f"\"{d}\"")
-' "$TARGET/.rewrite-manifest.json" "$INCLUDE_PUBLISHED")
+' "$TARGET/.rewrite-manifest.json" "$TARGET_KIND")
 
 # 3b — loose *.gradle[.kts] files at project roots (e.g. documentation/documentation.gradle.kts)
 while IFS= read -r proj; do
@@ -155,11 +173,11 @@ for nb in data.get("nestedBuilds", []):
 ' "$TARGET/.rewrite-manifest.json")
 
 if [ "${#SRC_DIRS[@]}" -eq 0 ] && [ "${#SCRIPT_FILES[@]}" -eq 0 ]; then
-    echo "[run-migration] no build-logic sources found"
+    echo "[run-migration] no $TARGET_KIND sources found"
     exit 0
 fi
 
-echo "[run-migration] build-logic dirs: ${#SRC_DIRS[@]}, scripts: ${#SCRIPT_FILES[@]}"
+echo "[run-migration] $TARGET_KIND dirs: ${#SRC_DIRS[@]}, scripts: ${#SCRIPT_FILES[@]}"
 printf '  dir:    %s\n' "${SRC_DIRS[@]}"
 printf '  script: %s\n' "${SCRIPT_FILES[@]}"
 

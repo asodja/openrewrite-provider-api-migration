@@ -17,6 +17,17 @@ import java.io.File
 val collectedEntries = java.util.concurrent.CopyOnWriteArrayList<String>()
 val collectedRoots = java.util.concurrent.CopyOnWriteArraySet<String>()
 
+// Raw per-project data collected during afterEvaluate. We defer classification to
+// projectsEvaluated so we can cross-reference buildscript classpaths (authoritative source
+// of "which projects provide plugins to which").
+data class ProjectRow(
+    val path: String,
+    val dir: String,
+    val appliesJavaGradlePlugin: Boolean,
+    val sourceSets: List<Pair<String, List<String>>>,
+)
+val projectRows = java.util.concurrent.CopyOnWriteArrayList<ProjectRow>()
+
 gradle.allprojects {
     // Only act on the primary build. Included builds get their own init-script invocations.
     if (gradle.parent != null) return@allprojects
@@ -25,60 +36,19 @@ gradle.allprojects {
         collectedRoots.add(projectDir.absolutePath)
         val ssc = extensions.findByType(org.gradle.api.tasks.SourceSetContainer::class.java)
             ?: return@afterEvaluate
-        // Three-way classification:
-        //
-        //   production           — not a Gradle plugin at all (regular library / application).
-        //                          Never migrated.
-        //
-        //   publishedGradlePlugin — a Gradle plugin that's intended to be CONSUMED OUTSIDE this
-        //                          build (published to Maven Central / the Gradle Plugin Portal).
-        //                          Examples: Kotlin's `libraries/tools/kotlin-gradle-plugin`,
-        //                          Elasticsearch's `build-tools`, Shadow, Spotless.
-        //                          Auto-migrating these is dangerous: they support many Gradle
-        //                          versions back and changing their public API breaks users on
-        //                          older Gradle. Excluded by default; opt in via
-        //                          `--include-published-plugins` on the runner.
-        //
-        //   buildLogic           — Gradle plugin code that stays INSIDE this build (buildSrc,
-        //                          pluginManagement-included builds, convention plugins). Safe
-        //                          to migrate: the whole build moves forward together. Default
-        //                          target of the migration.
-        //
-        // The "publishes?" signal is the key discriminator between the two Gradle-plugin kinds.
-        // A project publishing to Maven Central / Ivy / Gradle Plugin Portal declares one of
-        // these publish plugins; buildSrc / convention-plugin targets typically do not.
+        // Collect per-project facts. Classification is deferred to projectsEvaluated where we
+        // can cross-reference buildscript classpaths (the authoritative signal).
         val appliesJgp = pluginManager.hasPlugin("java-gradle-plugin")
-        val publishes = pluginManager.hasPlugin("maven-publish")
-                || pluginManager.hasPlugin("ivy-publish")
-                || pluginManager.hasPlugin("com.gradle.plugin-publish")
-        val kind = when {
-            appliesJgp && publishes -> "publishedGradlePlugin"
-            appliesJgp              -> "buildLogic"
-            else                    -> "production"
+        val sourceSetInfo = ssc.mapNotNull { ss ->
+            val dirs = ss.allSource.srcDirs.filter { it.exists() }.map { it.absolutePath }
+            if (dirs.isEmpty()) null else ss.name to dirs
         }
-        ssc.forEach { ss ->
-            val srcDirs = ss.allSource.srcDirs.filter { it.exists() }.map { it.absolutePath }
-            if (srcDirs.isEmpty()) return@forEach
-            // We deliberately do NOT resolve compile classpath per source set here. Two reasons:
-            //   1. Gradle 9's project-lock rules reject some cross-project resolutions.
-            //   2. On some projects (Spring's :integration-tests) eager classpath resolution
-            //      trips "Cannot mutate the hierarchy of configuration" ordering errors.
-            // The standalone runner gets a shared Gradle-API classpath from the distribution lib/
-            // dir instead — enough for type-attribution on build-logic Java files.
-            collectedEntries += buildString {
-                append("{\"project\":")
-                append(path.jsonEncode())
-                append(",\"sourceSet\":")
-                append(ss.name.jsonEncode())
-                append(",\"kind\":")
-                append(kind.jsonEncode())
-                append(",\"srcDirs\":")
-                append(srcDirs.toJsonArray())
-                append(",\"classpath\":")
-                append(emptyList<String>().toJsonArray())
-                append("}")
-            }
-        }
+        projectRows.add(ProjectRow(
+            path = path,
+            dir = projectDir.absolutePath,
+            appliesJavaGradlePlugin = appliesJgp,
+            sourceSets = sourceSetInfo,
+        ))
     }
 }
 
@@ -87,9 +57,71 @@ gradle.projectsEvaluated {
     if (gradle.parent != null) {
         return@projectsEvaluated
     }
+
+    // --- Structural classification via buildscript classpath ---------------------------------
+    //
+    // Principle: a project is build-logic iff its compiled output is explicitly declared on some
+    // script's buildscript classpath inside this build. That's the authoritative Gradle-model
+    // signal — build-logic is the code that Gradle loads at configuration time to resolve plugin
+    // classes and buildscript blocks.
+    //
+    // Implementation: walk every project's `buildscript.configurations.classpath` (the dependency
+    // set on the buildscript-block classpath). Any `ProjectDependency` there points at a project
+    // that provides plugins via the classic `buildscript { dependencies { classpath project(":foo")
+    // } }` pattern — that project IS build-logic.
+    //
+    // We deliberately do NOT take the transitive closure over `implementation`/`api` etc. of those
+    // projects. A production library (e.g. `:kotlin-stdlib`) that a build-logic project happens to
+    // use as a compile dependency is still a production library, not plugin code. Conflating the
+    // two would run recipes against non-plugin sources and break unsuspecting library code. The
+    // known cost is that multi-project build-logic split inside one build via `buildscript
+    // { classpath project(":a") }` + `:a` depends on `:b` via `implementation` will classify only
+    // `:a` — not `:b`. Builds using that pattern should migrate to `pluginManagement
+    // { includeBuild }` or add each helper to the buildscript classpath explicitly.
+    //
+    // Nested builds (`buildSrc`, `includeBuild(...)`, `pluginManagement.includeBuild(...)`) are
+    // enumerated below into `nestedBuilds` and the runner walks each whole-dir — a convention that
+    // assumes those directories contain exclusively build-logic (as is standard). This classifier
+    // only needs to partition THIS build's own subprojects.
+    val buildLogicPaths = mutableSetOf<String>()
+    rootProject.allprojects.forEach { p ->
+        val cp = p.buildscript.configurations.findByName("classpath") ?: return@forEach
+        cp.dependencies.forEach { dep ->
+            if (dep is org.gradle.api.artifacts.ProjectDependency) {
+                try { buildLogicPaths.add(dep.path) } catch (_: Throwable) {}
+            }
+        }
+    }
+
+    // --- Emit manifest entries with final classification -------------------------------------
     val manifestFile = File(rootProject.rootDir, ".rewrite-manifest.json")
-    val entries = collectedEntries.toList()
     val projectRoots = collectedRoots.toSortedSet()
+    projectRows.forEach { row ->
+        val kind = when {
+            // DEFINITIVE — project's output is declared directly on some script's
+            // buildscript classpath (via `buildscript { dependencies { classpath project(...) } }`).
+            // That means Gradle loads its classes at configuration time to resolve plugins /
+            // buildscript blocks. This IS build-logic.
+            row.path in buildLogicPaths   -> "buildLogic"
+            // Applies `java-gradle-plugin` but is NOT consumed by any buildscript classpath in
+            // this build — treated as a plugin the user ships to external consumers. Migrate
+            // these only when explicitly opted in (runtime breakage risk for downstream users).
+            row.appliesJavaGradlePlugin   -> "publishedGradlePlugin"
+            // Neither build-logic nor a Gradle plugin → production code. Out of scope here.
+            else                          -> "production"
+        }
+        row.sourceSets.forEach { (ssName, dirs) ->
+            collectedEntries += buildString {
+                append("{\"project\":"); append(row.path.jsonEncode())
+                append(",\"sourceSet\":"); append(ssName.jsonEncode())
+                append(",\"kind\":"); append(kind.jsonEncode())
+                append(",\"srcDirs\":"); append(dirs.toJsonArray())
+                append(",\"classpath\":"); append(emptyList<String>().toJsonArray())
+                append("}")
+            }
+        }
+    }
+    val entries = collectedEntries.toList()
 
     // Also record the project-root paths of included builds (and buildSrc if present) so the
     // runner can recurse into them with its own discovery.
