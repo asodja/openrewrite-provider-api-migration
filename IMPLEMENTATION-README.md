@@ -60,11 +60,24 @@ Three stages:
 
    The manifest records, per source set:
      - `project`, `sourceSet`, `srcDirs`
-     - `kind` = `"buildLogic"` iff the project applies `java-gradle-plugin`
-       (the general-purpose, accurate classifier — covers `buildSrc`,
-       `pluginManagement { includeBuild(...) }` targets, `kotlin-dsl`
-       projects, and published plugin projects; correctly excludes code
-       that merely imports `org.gradle.*` like gradle/gradle's own sources)
+     - `kind`, a three-way classification:
+         - `"buildLogic"` — the project applies `java-gradle-plugin` AND
+           does NOT apply any publishing plugin. This covers buildSrc,
+           `pluginManagement { includeBuild(...) }` targets, convention
+           plugins, kotlin-dsl projects. Safe to auto-migrate: the whole
+           build moves forward together.
+         - `"publishedGradlePlugin"` — applies `java-gradle-plugin` AND
+           one of `maven-publish`, `ivy-publish`, `com.gradle.plugin-publish`.
+           A plugin INTENDED to be consumed OUTSIDE this build (e.g.
+           `libraries/tools/kotlin-gradle-plugin` in the Kotlin repo, or a
+           Shadow plugin subproject). Excluded by default because these
+           plugins support many Gradle versions back and changing their
+           public API breaks downstream users. Opt in via the runner's
+           `--include-published-plugins` flag.
+         - `"production"` — not a Gradle plugin. Regular library /
+           application code. Never migrated.
+       Correctly excludes code that merely imports `org.gradle.*` like
+       gradle/gradle's own source tree or Tooling API consumers.
      - `projectRoots`, `nestedBuilds` (separate entries for `buildSrc` and
        explicit `includeBuild` targets)
      - `gradleApi` — list of jars in the Gradle distribution's `lib/` dir,

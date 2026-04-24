@@ -4,14 +4,21 @@
 # Flow:
 #   1. Runs discovery-init.gradle.kts to extract per-source-set dirs from the target Gradle project
 #      (configuration-only, no compile cascade). The init-script classifies each project as
-#      `buildLogic` or `production` based on whether it applies `java-gradle-plugin` — this is the
-#      authoritative model signal, and critically it does NOT misclassify projects that merely
-#      import `org.gradle.*` (e.g., gradle/gradle's own source, Tooling API consumers).
-#   2. Filters to `kind=buildLogic` source sets plus `.gradle[.kts]` scripts plus nested builds.
+#      `buildLogic`, `publishedGradlePlugin`, or `production`:
+#        - `buildLogic`           — applies java-gradle-plugin AND does NOT publish. The
+#                                   plugin stays inside this build (buildSrc, convention plugins,
+#                                   pluginManagement-included builds). Safe to auto-migrate.
+#        - `publishedGradlePlugin` — applies java-gradle-plugin AND publishes (maven-publish /
+#                                   ivy-publish / com.gradle.plugin-publish). Consumed outside
+#                                   this build by users on various Gradle versions. SKIPPED by
+#                                   default to avoid breaking downstream users; opt in via
+#                                   --include-published-plugins.
+#        - `production`           — not a Gradle plugin. Never migrated.
+#   2. Filters to the selected kinds, plus `.gradle[.kts]` scripts and nested builds.
 #   3. Invokes StandaloneRunner against those dirs with the MigrateToProviderApi recipe.
 #
 # Usage:
-#   ./run-migration.sh <target-project-dir> [--apply]
+#   ./run-migration.sh <target-project-dir> [--apply] [--verbose] [--include-published-plugins]
 #
 # By default this is a dry run — pass --apply to write changes to disk.
 
@@ -20,16 +27,25 @@ set -e
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${1:-}"
 if [ -z "$TARGET" ] || [ "$TARGET" = "-h" ] || [ "$TARGET" = "--help" ]; then
-    echo "usage: $0 <target-project-dir> [--apply] [--verbose]"
+    echo "usage: $0 <target-project-dir> [--apply] [--verbose] [--include-published-plugins]"
     echo ""
-    echo "  target-project-dir   absolute or relative path to a Gradle project"
-    echo "  --apply              write changes (default: dry run)"
-    echo "  --verbose            print unified diffs in dry-run mode"
+    echo "  target-project-dir            absolute or relative path to a Gradle project"
+    echo "  --apply                       write changes (default: dry run)"
+    echo "  --verbose                     print unified diffs in dry-run mode"
+    echo "  --include-published-plugins   also migrate Gradle plugins published to Maven Central /"
+    echo "                                Plugin Portal. OFF by default — these plugins often support"
+    echo "                                many Gradle versions back, so auto-migration can break users."
     exit 2
 fi
 TARGET="$(cd "$TARGET" && pwd)"
 shift || true
 EXTRA_ARGS=("$@")
+INCLUDE_PUBLISHED="no"
+for a in "${EXTRA_ARGS[@]}"; do
+    case "$a" in
+        --include-published-plugins) INCLUDE_PUBLISHED="yes" ;;
+    esac
+done
 
 echo "[run-migration] target: $TARGET"
 
@@ -73,21 +89,37 @@ fi
 SRC_DIRS=()
 SCRIPT_FILES=()
 
-# 3a — source-set dirs marked buildLogic by the manifest
+# 3a — source-set dirs marked buildLogic by the manifest (and optionally publishedGradlePlugin).
+# Count and report skipped published-plugin source sets for visibility.
+SKIPPED_PUBLISHED_PROJECTS=$(python3 -c '
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+projects = sorted({ss["project"] for ss in data.get("sourceSets", []) if ss.get("kind") == "publishedGradlePlugin"})
+for p in projects: print(p)
+' "$TARGET/.rewrite-manifest.json")
+if [ -n "$SKIPPED_PUBLISHED_PROJECTS" ] && [ "$INCLUDE_PUBLISHED" != "yes" ]; then
+    echo "[run-migration] skipping published Gradle plugin projects (use --include-published-plugins to migrate):"
+    echo "$SKIPPED_PUBLISHED_PROJECTS" | sed 's/^/    /'
+fi
+
 while IFS= read -r dir; do
     dir="${dir%\"*}"; dir="${dir#*\"}"
     [ -d "$dir" ] || continue
     SRC_DIRS+=("$dir")
 done < <(python3 -c '
 import json, sys
+include_published = sys.argv[2] == "yes"
 with open(sys.argv[1]) as f:
     data = json.load(f)
+allowed = {"buildLogic"}
+if include_published: allowed.add("publishedGradlePlugin")
 for ss in data.get("sourceSets", []):
-    if ss.get("kind") != "buildLogic":
+    if ss.get("kind") not in allowed:
         continue
     for d in ss.get("srcDirs", []):
         print(f"\"{d}\"")
-' "$TARGET/.rewrite-manifest.json")
+' "$TARGET/.rewrite-manifest.json" "$INCLUDE_PUBLISHED")
 
 # 3b — loose *.gradle[.kts] files at project roots (e.g. documentation/documentation.gradle.kts)
 while IFS= read -r proj; do

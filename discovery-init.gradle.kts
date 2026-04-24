@@ -25,15 +25,37 @@ gradle.allprojects {
         collectedRoots.add(projectDir.absolutePath)
         val ssc = extensions.findByType(org.gradle.api.tasks.SourceSetContainer::class.java)
             ?: return@afterEvaluate
-        // A project is build-logic iff it applies `java-gradle-plugin`. This is the authoritative
-        // signal from the Gradle model and covers every build-logic convention in general use:
-        //   - buildSrc (Gradle auto-applies groovy-gradle-plugin / java-gradle-plugin)
-        //   - pluginManagement { includeBuild(...) } targets (convention-plugin authoring)
-        //   - kotlin-dsl projects (kotlin-dsl applies java-gradle-plugin)
-        //   - plain plugin projects (plugins { `java-gradle-plugin` })
-        // It correctly excludes production Java/Kotlin code that imports `org.gradle.*` but isn't
-        // a plugin — e.g. Gradle's own source in gradle/gradle, or Tooling API consumers.
-        val kind = if (pluginManager.hasPlugin("java-gradle-plugin")) "buildLogic" else "production"
+        // Three-way classification:
+        //
+        //   production           — not a Gradle plugin at all (regular library / application).
+        //                          Never migrated.
+        //
+        //   publishedGradlePlugin — a Gradle plugin that's intended to be CONSUMED OUTSIDE this
+        //                          build (published to Maven Central / the Gradle Plugin Portal).
+        //                          Examples: Kotlin's `libraries/tools/kotlin-gradle-plugin`,
+        //                          Elasticsearch's `build-tools`, Shadow, Spotless.
+        //                          Auto-migrating these is dangerous: they support many Gradle
+        //                          versions back and changing their public API breaks users on
+        //                          older Gradle. Excluded by default; opt in via
+        //                          `--include-published-plugins` on the runner.
+        //
+        //   buildLogic           — Gradle plugin code that stays INSIDE this build (buildSrc,
+        //                          pluginManagement-included builds, convention plugins). Safe
+        //                          to migrate: the whole build moves forward together. Default
+        //                          target of the migration.
+        //
+        // The "publishes?" signal is the key discriminator between the two Gradle-plugin kinds.
+        // A project publishing to Maven Central / Ivy / Gradle Plugin Portal declares one of
+        // these publish plugins; buildSrc / convention-plugin targets typically do not.
+        val appliesJgp = pluginManager.hasPlugin("java-gradle-plugin")
+        val publishes = pluginManager.hasPlugin("maven-publish")
+                || pluginManager.hasPlugin("ivy-publish")
+                || pluginManager.hasPlugin("com.gradle.plugin-publish")
+        val kind = when {
+            appliesJgp && publishes -> "publishedGradlePlugin"
+            appliesJgp              -> "buildLogic"
+            else                    -> "production"
+        }
         ssc.forEach { ss ->
             val srcDirs = ss.allSource.srcDirs.filter { it.exists() }.map { it.absolutePath }
             if (srcDirs.isEmpty()) return@forEach
