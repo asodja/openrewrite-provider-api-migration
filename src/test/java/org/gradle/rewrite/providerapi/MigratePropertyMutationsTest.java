@@ -1,11 +1,13 @@
 package org.gradle.rewrite.providerapi;
 
 import org.junit.jupiter.api.Test;
+import org.openrewrite.java.JavaParser;
 import org.openrewrite.kotlin.KotlinParser;
 import org.openrewrite.test.RecipeSpec;
 import org.openrewrite.test.RewriteTest;
 import org.openrewrite.test.TypeValidation;
 
+import static org.openrewrite.java.Assertions.java;
 import static org.openrewrite.kotlin.Assertions.kotlin;
 
 /**
@@ -145,6 +147,54 @@ class MigratePropertyMutationsTest implements RewriteTest {
                         "    environment.put(\"K\", \"V\")\n" +
                         "}\n",
                         spec -> spec.path("build.gradle.kts")
+                )
+        );
+    }
+
+    @Test
+    void rewritesJavaMapPropertyRemove() {
+        // In Java, `.putIfAbsent(...)` / `.remove(...)` on a MapProperty are compile errors
+        // post-migration. The mechanical rewrite uses the same internal `.replace(Transformer)`
+        // API as Kotlin but in Java syntax, with an explicit HashMap copy in the transformer
+        // body. Uses plain JavaParser (no Kotlin script mode).
+        rewriteRun(
+                spec -> spec.recipe(new MigratePropertyMutations())
+                        .parser(JavaParser.fromJavaVersion().dependsOn(GradleApiStubs.ALL))
+                        .typeValidationOptions(TypeValidation.builder()
+                                .methodInvocations(false)
+                                .identifiers(false)
+                                .variableDeclarations(false)
+                                .methodDeclarations(false)
+                                .build()),
+                java(
+                        "import org.gradle.api.tasks.testing.Test;\n" +
+                        "class P {\n" +
+                        "    void cfg(Test test) {\n" +
+                        "        test.getSystemProperties().remove(\"K\");\n" +
+                        "    }\n" +
+                        "}\n",
+                        "import org.gradle.api.tasks.testing.Test;\n" +
+                        "class P {\n" +
+                        "    void cfg(Test test) {\n" +
+                        "        /*\n" +
+                        "         * TODO: Uses Gradle internal API (DefaultMapProperty). Fragile —\n" +
+                        "         * consider the public copy-mutate-set form instead:\n" +
+                        "         *     java.util.Map<Object, Object> updated = new java.util.HashMap<>(test.getSystemProperties().get());\n" +
+                        "         *     updated.remove(\"K\");\n" +
+                        "         *     test.getSystemProperties().set(updated);\n" +
+                        "         * \n" +
+                        "         * The raw-type cast below triggers a `rawtypes` compiler warning and the generic\n" +
+                        "         * call triggers `unchecked` / `unchecked_cast` warnings. To silence them, annotate\n" +
+                        "         * the enclosing method or class with:\n" +
+                        "         *     @SuppressWarnings({\"rawtypes\", \"unchecked\"})\n" +
+                        "         */\n" +
+                        "        ((org.gradle.api.internal.provider.DefaultMapProperty) test.getSystemProperties()).replace(__provider -> __provider.map(m -> {\n" +
+                        "            java.util.Map<Object, Object> __updated = new java.util.HashMap<>(m);\n" +
+                        "            __updated.remove(\"K\");\n" +
+                        "            return __updated;\n" +
+                        "        }));\n" +
+                        "    }\n" +
+                        "}\n"
                 )
         );
     }

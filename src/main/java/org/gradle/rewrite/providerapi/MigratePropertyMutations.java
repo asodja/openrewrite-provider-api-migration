@@ -14,6 +14,7 @@ import org.openrewrite.java.JavaVisitor;
 import org.openrewrite.java.tree.Expression;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.JavaType;
+import org.openrewrite.java.JavaTemplate;
 import org.openrewrite.kotlin.KotlinTemplate;
 
 import java.util.Arrays;
@@ -91,6 +92,33 @@ public class MigratePropertyMutations extends Recipe {
         LAMBDA_VAR.put(Kind.SET_PROPERTY, "s");
     }
 
+    /** JDK concrete implementation type used for the copy in the Java rewrite. */
+    private static final Map<Kind, String> JAVA_MUTABLE_IMPL = new EnumMap<>(Kind.class);
+    static {
+        JAVA_MUTABLE_IMPL.put(Kind.MAP_PROPERTY, "java.util.HashMap");
+        JAVA_MUTABLE_IMPL.put(Kind.LIST_PROPERTY, "java.util.ArrayList");
+        JAVA_MUTABLE_IMPL.put(Kind.SET_PROPERTY, "java.util.LinkedHashSet");
+    }
+
+    /** Collection-interface type (with {@code Object} type args) used for the local var in the Java rewrite. */
+    private static final Map<Kind, String> JAVA_ERASED_INTERFACE = new EnumMap<>(Kind.class);
+    static {
+        JAVA_ERASED_INTERFACE.put(Kind.MAP_PROPERTY, "java.util.Map<Object, Object>");
+        JAVA_ERASED_INTERFACE.put(Kind.LIST_PROPERTY, "java.util.List<Object>");
+        JAVA_ERASED_INTERFACE.put(Kind.SET_PROPERTY, "java.util.Set<Object>");
+    }
+
+    /** Java raw-type cast target (no generic args) — avoids {@code unchecked} on the cast itself. */
+    private static final Map<Kind, String> JAVA_INTERNAL_TYPE_RAW = new EnumMap<>(Kind.class);
+    static {
+        JAVA_INTERNAL_TYPE_RAW.put(Kind.MAP_PROPERTY,
+                "org.gradle.api.internal.provider.DefaultMapProperty");
+        JAVA_INTERNAL_TYPE_RAW.put(Kind.LIST_PROPERTY,
+                "org.gradle.api.internal.provider.DefaultListProperty");
+        JAVA_INTERNAL_TYPE_RAW.put(Kind.SET_PROPERTY,
+                "org.gradle.api.internal.provider.DefaultSetProperty");
+    }
+
     @Override
     public String getDisplayName() {
         return "Rewrite unsupported collection-property mutations via internal `.replace { }`";
@@ -129,13 +157,18 @@ public class MigratePropertyMutations extends Recipe {
                     return m;
                 }
                 SourceFile sourceFile = getCursor().firstEnclosing(SourceFile.class);
-                if (match.confident && GradleBuildLogic.isKotlin(sourceFile)) {
-                    return rewriteAsReplaceBlock(m, match.kind, getCursor());
+                if (match.confident) {
+                    if (GradleBuildLogic.isKotlin(sourceFile)) {
+                        return rewriteAsKotlinReplaceBlock(m, match.kind, getCursor());
+                    }
+                    // Java mechanical rewrite. Shape differs from Kotlin's `as X` inline cast —
+                    // Java needs an explicit `((X) recv).replace(transformer)` with a
+                    // copy-mutate-return lambda body instead of Kotlin's `.apply { }` trick.
+                    return rewriteAsJavaReplaceBlock(m, match.kind, getCursor());
                 }
-                // Non-confident match OR Java source — leave a TODO advisor so the user can
-                // review case-by-case. For candidate matches this is essential: the receiver
-                // might be an unrelated third-party property that collides on name (e.g.
-                // Shadow plugin's `excludes: Set<String>` vs catalog's
+                // Non-confident match — leave a TODO advisor so the user can review case-by-case.
+                // The receiver might be an unrelated third-party property that collides on name
+                // (e.g. Shadow plugin's `excludes: Set<String>` vs catalog's
                 // `JacocoTaskExtension.excludes: ListProperty`).
                 return Advisor.addTodo(m, adviceMessage(m, match, getCursor()));
             }
@@ -252,7 +285,7 @@ public class MigratePropertyMutations extends Recipe {
      * at the expression level would confuse rewrite-kotlin's printer, so we recommend the
      * file-level {@code @file:Suppress("UNCHECKED_CAST")} opt-out in the comment instead).
      */
-    private static J rewriteAsReplaceBlock(J.MethodInvocation m, Kind kind, Cursor cursor) {
+    private static J rewriteAsKotlinReplaceBlock(J.MethodInvocation m, Kind kind, Cursor cursor) {
         String receiver = renderReceiver(m.getSelect(), cursor);
         String call = m.getSimpleName();
         String args = renderArgs(m, cursor);
@@ -265,11 +298,56 @@ public class MigratePropertyMutations extends Recipe {
         J rewritten = KotlinTemplate.builder(snippet)
                 .build()
                 .apply(cursor, m.getCoordinates().replace());
-        return Advisor.addTodo(rewritten, reviewMessage(kind, receiver, call, args));
+        return Advisor.addTodo(rewritten, kotlinReviewMessage(kind, receiver, call, args));
     }
 
-    /** Short TODO prepended above the internal-API rewrite so it's easy to grep for later. */
-    private static String reviewMessage(Kind kind, String receiver, String call, String args) {
+    /**
+     * Emit the Java equivalent:
+     * <pre>
+     *   ((DefaultMapProperty) environment).replace(
+     *       provider -> provider.map(m -> {
+     *           Map&lt;Object, Object&gt; updated = new HashMap&lt;&gt;(m);
+     *           updated.remove("X");
+     *           return updated;
+     *       })
+     *   );
+     * </pre>
+     * <p>Shape decisions:
+     * <ul>
+     *   <li>Raw-type cast ({@code (DefaultMapProperty)}) — avoids the {@code unchecked}
+     *       warning the parameterized cast would produce, at the cost of a single
+     *       {@code rawtypes} warning which {@code @SuppressWarnings("rawtypes")} silences
+     *       file-wide. (We flag this in the TODO.)</li>
+     *   <li>Fully qualified {@code java.util.HashMap} / {@code java.util.Map&lt;Object, Object&gt;}
+     *       — avoids import management; the call site may already have a shadowed {@code Map}.</li>
+     *   <li>{@code Object, Object} type args — we don't know {@code K, V} statically; the copy
+     *       constructor on {@code HashMap<Object, Object>} accepts {@code Map<? extends K, ?
+     *       extends V>}. Same for List/Set.</li>
+     * </ul>
+     */
+    private static J rewriteAsJavaReplaceBlock(J.MethodInvocation m, Kind kind, Cursor cursor) {
+        String receiver = renderReceiver(m.getSelect(), cursor);
+        String call = m.getSimpleName();
+        String args = renderArgs(m, cursor);
+        String rawCastType = JAVA_INTERNAL_TYPE_RAW.get(kind);
+        String collectionIface = JAVA_ERASED_INTERFACE.get(kind);
+        String mutableImpl = JAVA_MUTABLE_IMPL.get(kind);
+        String var = LAMBDA_VAR.get(kind);
+        String snippet =
+                "((" + rawCastType + ") " + receiver + ").replace(__provider -> __provider.map(" +
+                var + " -> {\n" +
+                "    " + collectionIface + " __updated = new " + mutableImpl + "<>(" + var + ");\n" +
+                "    __updated." + call + "(" + args + ");\n" +
+                "    return __updated;\n" +
+                "}));";
+        J rewritten = JavaTemplate.builder(snippet)
+                .build()
+                .apply(cursor, m.getCoordinates().replace());
+        return Advisor.addTodo(rewritten, javaReviewMessage(kind, receiver, call, args));
+    }
+
+    /** Short TODO prepended above the Kotlin internal-API rewrite so it's easy to grep for later. */
+    private static String kotlinReviewMessage(Kind kind, String receiver, String call, String args) {
         String toMut = TO_MUTABLE.get(kind);
         return "Uses Gradle internal API (" + internalShortName(kind) + "). Fragile —\n" +
                "consider the public copy-mutate-set form instead:\n" +
@@ -281,6 +359,22 @@ public class MigratePropertyMutations extends Recipe {
                "UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING warnings;\n" +
                "to silence them, add at the top of this script:\n" +
                "    @file:Suppress(\"UNCHECKED_CAST\", \"UPPER_BOUND_VIOLATED_IN_TYPE_OPERATOR_OR_PARAMETER_BOUNDS_WARNING\")";
+    }
+
+    /** Same shape as {@link #kotlinReviewMessage} but adapted to Java syntax. */
+    private static String javaReviewMessage(Kind kind, String receiver, String call, String args) {
+        String collectionIface = JAVA_ERASED_INTERFACE.get(kind);
+        String mutableImpl = JAVA_MUTABLE_IMPL.get(kind);
+        return "Uses Gradle internal API (" + internalShortName(kind) + "). Fragile —\n" +
+               "consider the public copy-mutate-set form instead:\n" +
+               "    " + collectionIface + " updated = new " + mutableImpl + "<>(" + receiver + ".get());\n" +
+               "    updated." + call + "(" + args + ");\n" +
+               "    " + receiver + ".set(updated);\n" +
+               "\n" +
+               "The raw-type cast below triggers a `rawtypes` compiler warning and the generic\n" +
+               "call triggers `unchecked` / `unchecked_cast` warnings. To silence them, annotate\n" +
+               "the enclosing method or class with:\n" +
+               "    @SuppressWarnings({\"rawtypes\", \"unchecked\"})";
     }
 
     private static String internalShortName(Kind kind) {
